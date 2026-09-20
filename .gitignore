@@ -1,0 +1,35 @@
+# --- Environment: NEVER commit real secrets -------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Node / Next -----------------------------------------------------------
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Local upload storage (dev fallback when S3_BUCKET is unset) -----------
+/media/
+/documents/
+
+# --- Test / coverage -------------------------------------------------------
+coverage/
+.vitest/
+
+# --- Logs / OS -------------------------------------------------------------
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# --- Editor ----------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# --- Payload ---------------------------------------------------------------
+# payload-types.ts and payload-generated.schema.ts ARE committed (CI diff-checked).
