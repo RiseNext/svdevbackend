@@ -1,5 +1,6 @@
 import type { ImageRef } from '@/types/frontend-contract'
 import { env } from '@/lib/env'
+import { cloudinaryFileUrl } from '@/media/mediaUrl'
 
 /**
  * A populated `media` document -> the ONLY public image shape.
@@ -38,15 +39,23 @@ export class UnpopulatedUploadError extends Error {
  * How Payload composes `url` is not documented beyond the
  * `/collectionSlug/staticURL/filename` pattern, and when a query selects `url`
  * on an upload collection it is "important to specify filename: true as well" —
- * otherwise Payload returns `url: null`. Building it ourselves from
- * CDN_BASE_URL + prefix + filename removes both dependencies.
+ * otherwise Payload returns `url: null`. Composing it ourselves removes both
+ * dependencies.
  *
- * Falls back to Payload's own `url` in local development, where CDN_BASE_URL is
- * intentionally empty and files are served from disk.
+ * 🔴 `cloudinaryFileUrl` is the SAME function the storage adapter's
+ * `generateURL` calls, so what Payload persists in `media.url` and what the
+ * public API emits as `ImageRef.src` are produced by one definition and cannot
+ * drift apart. Duplicating the composition here — which is what an S3-shaped
+ * `${BASE}/${prefix}/${filename}` template would be — is exactly how a media
+ * library 404s in production while every test passes.
+ *
+ * Falls back to Payload's own `url` in local development, where Cloudinary is
+ * intentionally unconfigured and files are served from disk.
  */
 const buildSrc = (doc: MediaLike, prefix: 'media' | 'documents'): string => {
-  if (env.CDN_BASE_URL && doc.filename) {
-    return `${env.CDN_BASE_URL.replace(/\/+$/, '')}/${prefix}/${doc.filename}`
+  if (doc.filename) {
+    const cdn = cloudinaryFileUrl(prefix, doc.filename)
+    if (cdn) return cdn
   }
   if (doc.url) return doc.url
   if (doc.filename) return `${env.NEXT_PUBLIC_SERVER_URL}/payload-api/${prefix}/file/${doc.filename}`

@@ -5,6 +5,12 @@ Written 20 September 2026 during the master implementation run.
 > **A procedure that has never been executed is not a control.** Two entries
 > below are marked **NOT YET REHEARSED** for that reason, and they are the two
 > that matter most in an incident.
+>
+> **Updated 20 Sep 2026** for the owner's production decisions: the database is
+> **Neon PostgreSQL** and media lives in **Cloudinary**. The values and the
+> outstanding owner deliverables are in
+> [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md); this document is the
+> sequence.
 
 ---
 
@@ -14,12 +20,20 @@ Each step gates the next. Do not skip ahead.
 
 ```
  1. Provision: container host + region (audience is Indian — keep app and
-    database in the SAME region), managed PostgreSQL 15+ with TLS and PITR,
-    an S3-compatible bucket, a CDN, DNS for www / cms / media, TLS certs.
+    database in the SAME region), a NEON PostgreSQL project, a CLOUDINARY
+    product environment, DNS for www / cms, TLS certs.
 
     🔴 `cms` MUST be a subdomain of the public site's registrable domain.
        An unrelated host forces SameSite=None, which removes the browser's own
        CSRF defence and makes the csrf allow-list load-bearing on its own.
+
+    ⚠️ There is NO `media` DNS record any more. Media is delivered from
+       Cloudinary's own host, which is a different registrable domain — a
+       stronger origin separation than the planned `media.<domain>`, at the
+       cost of a branded URL. See PRODUCTION-CONFIG.md §3 and D-125.
+
+    🔶 THE DOMAIN ITSELF IS STILL AN OWNER DELIVERABLE. Every place that
+       needs it is enumerated in PRODUCTION-CONFIG.md §4 — eleven of them.
 
  2. Reverse proxy: TLS termination, HTTP->HTTPS, HSTS, security headers,
     rate limits (§4 below), and the /payload-api/<slug> block rule.
@@ -29,6 +43,11 @@ Each step gates the next. Do not skip ahead.
 
  4. Database roles: the running app role has NO DDL; a separate migrate role
     HAS DDL. Set disableCreateDatabase (automatic when NODE_ENV=production).
+
+    🔴 NEON: the app uses the POOLED endpoint, the migrate job uses the DIRECT
+       one. Neon's pooler is PgBouncer in transaction mode, and Payload runs
+       migrations in a transaction with DDL. The two endpoints map onto the two
+       roles that already exist, so this adds no new variable.
 
  5. pg_dump a baseline of the EMPTY database — it proves the tooling works
     before anyone needs it.
@@ -51,9 +70,16 @@ Each step gates the next. Do not skip ahead.
 
 11. Deploy worker-default and worker-maintenance, ONE REPLICA EACH.
 
-12. 🔴 UPLOAD ONE REAL IMAGE IN PRODUCTION.
-    This is the ONLY reliable detector for the sharp native-binary failure:
-    build green, first upload throws. Payload documents nothing about it.
+12. 🔴 UPLOAD ONE REAL IMAGE IN PRODUCTION, THEN OPEN ITS DELIVERY URL.
+    This one step is the ONLY detector for THREE failures that are all invisible
+    until it runs:
+      a) the sharp native-binary failure — build green, first upload throws;
+      b) invalid Cloudinary credentials — NOT checked at boot, deliberately, so
+         that a Cloudinary outage cannot stop the CMS from starting;
+      c) a delivery-host mismatch between CLOUDINARY_DELIVERY_BASE_URL and
+         svfrontend's NEXT_PUBLIC_MEDIA_BASE_URL, which throws at every
+         next/image call site rather than degrading.
+    Upload a PDF too: it takes the Cloudinary `raw` path, which is separate code.
 
 13. Point svfrontend at NEXT_PUBLIC_API_BASE_URL; build and deploy it.
 
@@ -65,9 +91,19 @@ Each step gates the next. Do not skip ahead.
 
 16. Perform a RESTORE DRILL (§6). NFR-10 is not satisfied by having backups.
 
-17. 🔶 Publish and link the privacy policy.  ← BLOCKS LAUNCH.
+17. 🔶 Publish and link the privacy policy.  ← BLOCKS LAUNCH. STILL OPEN.
     POST /api/v1/leads REFUSES submissions in production until
-    PRIVACY_POLICY_URL is set. That is deliberate.
+    PRIVACY_POLICY_URL is set. That is deliberate and was not weakened.
+
+    THREE separate places, all required — see PRODUCTION-CONFIG.md §5:
+      a) PRIVACY_POLICY_URL in the backend environment  -> unlocks the endpoint
+      b) Site Settings > Legal > Privacy policy link    -> puts it in the footer
+      c) Site Settings > Content > formNote             -> the consent sentence
+         beside the submit button, which still reads "[LINK TO PRIVACY POLICY]"
+
+    The policy must name every sub-processor. That list GREW on 20 Sep 2026:
+    it now includes Cloudinary (media) and Neon (database — where lead name and
+    phone are stored), alongside the email provider.
 
 18. 🔴 LIFT BOTH INDEXING BLOCKS TOGETHER by setting
     NEXT_PUBLIC_ALLOW_INDEXING=true and redeploying the frontend.
@@ -152,12 +188,27 @@ simultaneously shipping `migrate:fresh` ("Drops all entities from the database")
 
 | What | How | Cadence |
 |---|---|---|
-| PostgreSQL | managed PITR, or `docker run --rm postgres:15 pg_dump -Fc` | nightly **and before every migration** |
-| Media | S3 bucket versioning + lifecycle rules | continuous |
+| PostgreSQL | **Neon PITR**, *and* `docker run --rm postgres:15 pg_dump -Fc` | nightly **and before every migration** |
+| Media | Cloudinary's own durability + the 30-day supersession record | continuous |
 
-**Consistency between the two is documented, not automated:** restoring Postgres
-to time T leaves objects uploaded after T as harmless orphans, and objects
-deleted after T as broken images recoverable from bucket versioning.
+**Both halves of the database row are required.** Neon's PITR is the fast path,
+but it is a vendor feature nobody here has restored from; the `pg_dump` is the
+copy that survives losing access to the vendor account entirely. `RUNBOOK.md` §6
+restores the dump, not the PITR branch, for exactly that reason.
+
+⚠️ **Media has no second copy, and that is a gap rather than a decision.**
+The S3 plan had bucket versioning; Cloudinary's equivalent (backups / revision
+history) is a paid add-on and is **not** assumed to be enabled. What does exist
+is application-level: `supersededFilenames` records the previous key on every
+replace, and `handleDelete` runs only when the Payload document is deleted —
+which the delete guards refuse while an asset is in use. **If media durability
+beyond Cloudinary's own is required, enabling Cloudinary backups is an owner
+cost decision.**
+
+**Consistency between database and media is documented, not automated:**
+restoring Postgres to time T leaves assets uploaded after T as harmless orphans
+in Cloudinary, and assets deleted after T as broken images that are *not*
+recoverable unless Cloudinary backups are on.
 
 ---
 

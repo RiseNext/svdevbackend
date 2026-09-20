@@ -1,3 +1,5 @@
+import { DEFAULT_SITE_NAME } from '@/lib/constants'
+
 import { escapeHtml } from './escapeHtml'
 import { renderBrandedEmail, renderPlainEmail, type BrandedEmailArgs } from './renderBrandedEmail'
 
@@ -20,7 +22,7 @@ type LeadLike = {
  * transformation and the outbound escape is an encoding, and a single layer of
  * either has historically been the thing that failed.
  */
-const buildArgs = (lead: LeadLike): BrandedEmailArgs => ({
+const buildArgs = (lead: LeadLike, siteName = DEFAULT_SITE_NAME): BrandedEmailArgs => ({
   heading: 'New enquiry',
   intro: `${lead.name} asked to be called back${
     lead.projectNameSnapshot ? ` about ${lead.projectNameSnapshot}` : ''
@@ -34,9 +36,11 @@ const buildArgs = (lead: LeadLike): BrandedEmailArgs => ({
     ['Page', escapeHtml(lead.sourcePath ?? '')],
     ['Received', escapeHtml(new Date(lead.createdAt).toISOString())],
   ],
-  footer:
-    'Sent automatically by the SV Developers website. Reply to the enquirer by phone — this mailbox is not monitored.',
+  footer: `Sent automatically by the ${siteName} website. Reply to the enquirer by phone — this mailbox is not monitored.`,
 })
 
-export const renderLeadEmail = (lead: LeadLike): string => renderBrandedEmail(buildArgs(lead))
-export const renderLeadEmailText = (lead: LeadLike): string => renderPlainEmail(buildArgs(lead))
+export const renderLeadEmail = (lead: LeadLike, siteName?: string): string =>
+  renderBrandedEmail(buildArgs(lead, siteName))
+
+export const renderLeadEmailText = (lead: LeadLike, siteName?: string): string =>
+  renderPlainEmail(buildArgs(lead, siteName))

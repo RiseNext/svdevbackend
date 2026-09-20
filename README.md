@@ -9,6 +9,11 @@ Specifications live in [`docs/`](./docs). Start with
 What was actually built, measured rather than assumed, is in
 [`docs/PHASE-1-GATE-REPORT.md`](./docs/PHASE-1-GATE-REPORT.md).
 
+**What must be set before go-live — and what is still waiting on the owner — is
+in [`docs/PRODUCTION-CONFIG.md`](./docs/PRODUCTION-CONFIG.md).** Production runs
+on **Neon PostgreSQL** and **Cloudinary**; the domain and the privacy-policy URL
+are deliberately not chosen yet.
+
 ---
 
 ## The house rules
@@ -90,9 +95,10 @@ cp .env.example .env
 #    Generate a secret:  openssl rand -hex 32
 #    Boot FAILS if PAYLOAD_SECRET is absent or under 32 characters — deliberately.
 
-# 3. Database (and optionally MinIO for the real S3 path)
+# 3. Database. That is the ONLY local service — production media lives in
+#    Cloudinary, which has no self-hostable equivalent. Leave the CLOUDINARY_*
+#    variables empty and uploads fall back to local disk at ./media.
 docker compose up -d
-docker compose --profile s3 up -d      # only if you want to exercise S3 locally
 
 # 4. Start. Drizzle `push` syncs the schema on first boot.
 npm run dev                            # http://localhost:3001
@@ -141,6 +147,8 @@ npm run build            # needs production-shaped env — see .env.ci.example
 | `npm run generate:db-schema` | Emit the Drizzle schema. **Read it before writing a migration** |
 | `npm run jobs:run` | Drain the default queue once |
 | `npm run jobs:loop` | Run the default queue on a cron |
+| `npm run check:drift` | Icon enum · public contract · `.env.example` — all three cross-file guards |
+| `npm run check:cms` | Proves every collection and the global are reachable and editable by an admin, by **executing** the access functions rather than reading the config |
 | `npm run sandbox:reset` | Destroy and recreate the local database |
 
 ## Layout
@@ -154,6 +162,8 @@ src/
   access/               the ENTIRE authorisation model: four functions
   hooks/                audit · revalidate · uploadGuard · mediaGuards
                         hardDeleteGuard · slugLock · leadHooks · authEvents
+  media/                storage (the plugin wiring) · cloudinary (the adapter)
+                        mediaUrl (the ONE definition of a public media URL)
   serializers/          the public contract. `...doc` spread is BANNED here
   lib/                  publicFind · definePublicEndpoint · errors · env · icons
   app/(payload)/        VENDOR CODE — generated, never edited

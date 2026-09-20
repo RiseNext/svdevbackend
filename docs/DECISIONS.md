@@ -900,11 +900,22 @@ Field mapping recorded one-to-one so the intent survives the table's deletion:
 | `scheduled_for` | `waitUntil` |
 | `payload` | `input` |
 
-## D-112 â€” OQ-7 closed to a *shape* only Â· INTERIM  *(plan step 13, T-008)*
+## D-112 â€” OQ-7 closed to a *shape* only Â· ~~INTERIM~~ **SUPERSEDED by D-123 (storage)**  *(plan step 13, T-008)*
 
 `@payloadcms/storage-s3` + `nodemailerAdapter` over SMTP. **The provider, region,
 account and credential ownership remain the owner's.** Both are reduced to
 environment variables; no code changes when the provider is chosen.
+
+> 🔶 **The storage half was superseded on 20 Sep 2026 by D-123: Cloudinary.**
+> The prediction that "no code changes when the provider is chosen" held for
+> email and **did not hold for storage** — Payload publishes no Cloudinary
+> adapter and Cloudinary has no S3-compatible endpoint, so `@payloadcms/storage-s3`
+> was removed and a ~100-line adapter written. Recorded because the assumption is
+> worth remembering: *"it is just an env var"* is true only within one adapter's
+> API family.
+>
+> The **email** half of D-112 still stands — `nodemailerAdapter` genuinely does
+> reduce the provider to environment variables (OQ-7b).
 
 ## D-113 â€” OQ-1 / OQ-2 / OQ-3 Â· INTERIM, engineering-adopted  *(plan step 14, T-009)*
 
@@ -1021,3 +1032,120 @@ integer `sort_order` is struck from `DATABASE-SCHEMA.md`, `VALIDATION-RULES.md` 
 must be measured from `generate:db-schema` before the public `sort` is written.
 Closed in D-130 once measured.
 
+
+---
+
+# OWNER DECISION PASS — 20 September 2026
+
+Six owner decisions, taken after implementation was complete. Full configuration
+detail in [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md).
+
+## D-122 — OQ-6 CLOSED: the public company name is "SV Developers" · ACCEPTED (owner)
+
+Supersedes the "SRR Developers Pvt. Ltd." that appears in the original brief and
+on the live site. `site-settings.name` already held this value; what changed is
+that it is now a **decision** rather than a repository artefact, and the field's
+admin help text says so.
+
+**Not closed by this:** `site-settings.legalName`, the REGISTERED entity name,
+which is a different field with a different use — it is the sole source of the
+footer copyright line. No registered name was supplied, so it continues to
+mirror the trading name. Recorded as still open rather than invented.
+
+**Consequence taken in the same pass (D-127):** the name is now CMS-sourced
+everywhere it renders, rather than partly CMS and partly literal.
+
+## D-123 — OQ-7a CLOSED: production media storage is Cloudinary · ACCEPTED (owner)
+
+**Supersedes D-112**, which closed OQ-7 to an S3 *shape* only.
+
+Payload publishes **no Cloudinary adapter** (the official set is Vercel Blob, S3,
+Azure, GCS, Uploadthing, R2) and Cloudinary exposes **no S3-compatible
+endpoint**, so `@payloadcms/storage-s3` could not be repointed. The documented
+route is `@payloadcms/plugin-cloud-storage` plus an adapter, which is what
+`src/media/cloudinary.ts` is.
+
+**A third-party `payload-cloudinary` package was rejected**: ~100 reviewed lines
+sitting in the media-security path are preferable to an unvetted supply-chain
+dependency handling every asset the business publishes.
+
+**No migration.** The adapter returns no metadata, and the storage plugin injects
+the same three fields (`url`, `prefix`, `_objectKey`) it did under S3 — verified
+by regenerating the Drizzle schema and diffing.
+
+**Recorded deviation:** `Content-Disposition: attachment` on PDFs
+(`MEDIA-MANAGEMENT.md` §10) was an S3 bucket-policy line and has no per-object
+equivalent on Cloudinary `raw` delivery. The control's *purpose* — serving
+uploads from a non-application origin — is satisfied more strongly than planned,
+because Cloudinary's host is a different registrable domain. The header itself is
+**not** claimed.
+
+## D-124 — Production database is Neon PostgreSQL · ACCEPTED (owner)
+
+No application change: Neon is PostgreSQL 15+ over TLS, which
+`@payloadcms/db-postgres` already speaks. Three operational consequences are
+recorded in `PRODUCTION-CONFIG.md` §2 — the **pooled/direct endpoint split**
+(Payload migrates inside a transaction and issues DDL; Neon's pooler is PgBouncer
+in transaction mode), **scale-to-zero cold starts** as a monitoring concern, and
+pool-size arithmetic against Neon's per-compute connection ceiling.
+
+`DATABASE_SSL=true` was already mandatory in production and is unchanged.
+
+## D-125 — D-109 amended: no `media` subdomain · ACCEPTED · domain still INTERIM
+
+D-109's origin shape was `www.<domain>` · `cms.<domain>` · `media.<domain>`.
+The third is **withdrawn**: Cloudinary delivers from its own host, and a custom
+delivery hostname is an Advanced-plan feature that has not been bought.
+
+The security requirement behind it — *"serve from a separate origin so uploaded
+content cannot script against the app origin"* — is **better** satisfied, since
+`res.cloudinary.com` is a separate registrable domain rather than a sibling
+subdomain. What is lost is a branded media URL.
+
+🔶 **The domain itself remains an owner deliverable and was not invented.** All
+eleven places that will need it are enumerated in `PRODUCTION-CONFIG.md` §4.
+The `cms`-must-be-a-subdomain rule is unchanged and is still an architecture
+requirement, not a preference.
+
+## D-126 — Storage plugin fields are now inserted in every environment · ACCEPTED
+
+`alwaysInsertFields: true` on `cloudStoragePlugin`.
+
+**This fixes a real inconsistency rather than tidying one.** The plugin injects
+`url`, `prefix` and `_objectKey` only when it is *enabled*, and the enable switch
+is environment-derived. The committed `src/payload-generated.schema.ts` had
+therefore been written with storage OFF and **lacked both `prefix` and
+`_objectkey`, while migration 001 creates them** — two committed artefacts
+describing different schemas. Regenerating with the flag on produces a four-line
+diff that adds exactly those columns, so config, migration and generated schema
+now agree in every environment. The plugin's own note is that this "ensures a
+consistent schema across all environments" and will be the default in Payload v4.
+
+## D-127 — Business identity is CMS-sourced end to end · ACCEPTED
+
+Following D-122, three places still rendered the company name from a literal.
+All now read `site-settings`:
+
+1. **`svfrontend/src/lib/seo.ts`** — `siteName` was optional with a
+   `'SV Developers'` default, and **three pages silently took it**
+   (`/amenities`, `/location`, `/master-plan`) because they used a module-level
+   `export const metadata`, which cannot await. Those four would have kept the
+   old name after a rename while the other four updated, with nothing reporting
+   it. The parameter is now **required** — a compile error, not a convention —
+   and the three pages use `generateMetadata`.
+2. **`svfrontend/src/components/layout/Logo.tsx`** — hardcoded the committed
+   emblem, so `site-settings.logo` (an ADMIN/T2 field in
+   `CONTENT-MANAGEMENT-MATRIX.md` §5, emitted by the public API since day one)
+   **rendered nowhere**. Uploading a logo in Admin changed nothing on the site.
+   It is now used, with the committed file as the fallback.
+3. **The lead notification email** — the footer read "the SV Developers
+   website". It now reads `site-settings.name`, wrapped so that a failed lookup
+   cannot fail the most business-critical path in the system.
+
+**Deliberately left static, with reasons:** marketing prose in
+`svfrontend/src/content/pages.ts` that happens to contain the name (STATIC/T3 —
+editorial voice, `CONTENT-MANAGEMENT-MATRIX.md` §3); the Admin Panel's own
+browser title (internal tooling chrome, not public content); the admin
+password-reset email subject (admin-internal); `svdevelopers` in the breached
+password list (a security control); and the seed's `@svdevelopers.local` fixture
+addresses (development only, non-routable TLD).

@@ -1,16 +1,38 @@
-import { s3Storage } from '@payloadcms/storage-s3'
+import { cloudStoragePlugin } from '@payloadcms/plugin-cloud-storage'
 
-import { env } from '@/lib/env'
+import { cloudinaryAdapter } from './cloudinary'
+import { cloudinaryEnabled } from './mediaUrl'
 
 /**
- * S3-COMPATIBLE STORAGE — one config, two behaviours.
+ * MEDIA STORAGE — one config, two behaviours.
  *
- * 🔴 THE PLUGIN IS ALWAYS REGISTERED, never conditionally included in
- * `plugins`. A config whose SHAPE varies by environment generates DIVERGENT
- * MIGRATIONS between machines — `migrate:create` would produce a different diff
- * on a colleague's laptop, and one of the two would be wrong. `enabled` is the
- * documented conditional switch, and with `S3_BUCKET` unset the plugin is inert
- * and Payload falls back to local disk.
+ * Production stores media in **Cloudinary** (owner decision, 20 Sep 2026;
+ * supersedes the S3-compatible assumption that every document in `docs/` was
+ * written against). Local development stores on disk, unchanged.
+ *
+ * 🔴 THE PLUGIN IS ALWAYS REGISTERED, never conditionally included in `plugins`.
+ * A config whose SHAPE varies by environment generates DIVERGENT MIGRATIONS
+ * between machines — `migrate:create` would produce a different diff on a
+ * colleague's laptop, and one of the two would be wrong. `enabled` is the
+ * documented conditional switch, and with `CLOUDINARY_CLOUD_NAME` unset the
+ * plugin is inert and Payload falls back to local disk.
+ *
+ * 🔴 `alwaysInsertFields: true` — A REAL FIX, NOT A TIDY-UP.
+ * The plugin injects three fields into every targeted upload collection: `url`,
+ * `prefix` and `_objectKey`. Without this flag it injects them ONLY when the
+ * plugin is enabled — so the previous configuration produced a schema with
+ * `prefix`/`_objectkey` in production and WITHOUT them on any developer machine
+ * that had storage switched off, while migration 001 (generated with storage on)
+ * contains both columns. The `enabled` switch above was doing half the job it was
+ * documented to do. The plugin's own note is that this "ensures a consistent
+ * schema across all environments" and that it "will be enabled by default in
+ * Payload v4"; turning it on now makes dev, test and production agree with the
+ * migration that is already committed, so it adds no migration of its own.
+ *
+ * ⚠️ `adapter: null` when disabled mirrors what `@payloadcms/storage-s3` does
+ * internally: the fields are still inserted, but the adapter is never
+ * constructed, so a machine with no Cloudinary credentials cannot fail at import
+ * time.
  *
  * 🔴 `disablePayloadAccessControl: true` — WHY IT MATTERS.
  * The most important paragraph in the storage-adapter docs, verbatim:
@@ -20,78 +42,54 @@ import { env } from '@/lib/env'
  * filename path. This plugin will 'pass through' all files."
  *
  * Left at that default, EVERY IMAGE URL ROUTES THROUGH THE NEXT.JS SERVER, which
- * then proxies S3: latency, egress cost, and it defeats the separate-origin
- * requirement — files would be served from the APP origin, which is precisely
- * the XSS adjacency the media design exists to avoid.
+ * then proxies Cloudinary: latency, double egress, and it defeats the
+ * separate-origin requirement — files would be served from the APP origin, which
+ * is precisely the XSS adjacency the media design exists to avoid.
  *
  * The trade is explicit: turning it on removes file-level access control
  * entirely. Correct for public marketing imagery; WRONG the moment brochures
  * become lead-gated — which is exactly why `documents` is a separate collection
  * and why OQ-18 must close before that changes.
  *
- * 🔴 HEADERS COME FROM THE BUCKET/CDN, NOT FROM PAYLOAD. `s3Storage()` exposes
- * NO option to set Cache-Control, and `upload.modifyResponseHeaders` only covers
- * the Payload-served path — which this flag removes us from. The bucket policy
- * must set: `Cache-Control: public, max-age=31536000, immutable` (safe ONLY
- * because the key is a UUID), `X-Content-Type-Options: nosniff`, and
- * `Content-Disposition: attachment` for PDFs. That split is recorded in
- * SECURITY.md and in the runbook, or it will be forgotten.
+ * 🔴 RESPONSE HEADERS COME FROM CLOUDINARY, NOT FROM PAYLOAD, and this remains
+ * true after the move. `upload.modifyResponseHeaders` covers only the
+ * Payload-served path, which `disablePayloadAccessControl` removes us from.
+ * Cloudinary serves delivery URLs with a long-lived immutable cache policy of its
+ * own, which is safe here only because the key is a UUID that is never reused.
+ *
+ * ⚠️ ONE DEVIATION FROM MEDIA-MANAGEMENT.md §10, RECORDED RATHER THAN GLOSSED:
+ * `Content-Disposition: attachment` for PDFs was an S3 bucket-policy line. PDFs
+ * are stored as Cloudinary `raw` assets, whose delivery headers are Cloudinary's
+ * and are not configurable per-object here. The control that mattered — serving
+ * uploaded content from an origin that is not the app origin — is fully intact,
+ * and `X-Content-Type-Options: nosniff` is applied on the proxied path in
+ * `staticHandler`. The disposition header is not claimed as satisfied.
  */
-
-/** Deterministic public URL. Composed from CDN_BASE_URL + prefix + filename
- *  rather than trusting the `url` field, whose composition is not documented
- *  beyond the `/collectionSlug/staticURL/filename` pattern. */
-const buildFileUrl = (prefix: string, filename: string): string => {
-  const base = (env.CDN_BASE_URL ?? '').replace(/\/+$/, '')
-  return `${base}/${prefix}/${filename}`
-}
-
-export const storagePlugin = s3Storage({
-  enabled: Boolean(env.S3_BUCKET),
+export const storagePlugin = cloudStoragePlugin({
+  enabled: cloudinaryEnabled,
+  alwaysInsertFields: true,
 
   collections: {
     media: {
       prefix: 'media',
+      adapter: cloudinaryEnabled ? cloudinaryAdapter : null,
       disablePayloadAccessControl: true,
-      // ⚠️ The exact `generateFileURL` signature is NOT published in the docs —
-      // only the type name and a one-line description. The destructured names
-      // were verified against the generated .d.ts before being relied on.
-      generateFileURL: ({ filename }: { filename: string }) => buildFileUrl('media', filename),
     },
     documents: {
       prefix: 'documents',
       // 🔶 OQ-18 FORK. Public brochures -> `true` (CDN-served, no access
-      // control). Lead-gated brochures -> leave this OFF so Payload's `read`
-      // access still applies, optionally with `signedDownloads`.
+      // control). Lead-gated brochures -> remove this line so Payload's `read`
+      // access still applies, and the adapter's `staticHandler` takes over.
       // THESE ARE MUTUALLY EXCLUSIVE SETTINGS ON THE SAME COLLECTION.
       // Interim: public, which PRESERVES THE OBSERVED BEHAVIOUR of the live
       // Lightbox download button. That is not a decision about the business
       // question; it is a decision not to change behaviour while it is open.
+      adapter: cloudinaryEnabled ? cloudinaryAdapter : null,
       disablePayloadAccessControl: true,
-      generateFileURL: ({ filename }: { filename: string }) => buildFileUrl('documents', filename),
     },
-  },
-
-  bucket: env.S3_BUCKET ?? '',
-  // The only value shown in the official example, and correct for public
-  // marketing imagery served from a CDN.
-  acl: 'public-read',
-
-  config: {
-    region: env.S3_REGION ?? 'us-east-1',
-    credentials: {
-      accessKeyId: env.S3_ACCESS_KEY_ID ?? '',
-      secretAccessKey: env.S3_SECRET_ACCESS_KEY ?? '',
-    },
-    // ⚠️ `endpoint` and `forcePathStyle` are AWS-SDK PASS-THROUGHS that
-    // Payload's own docs NEVER name. They are valid by virtue of `config` being
-    // "an S3ClientConfig object passed to the AWS SDK client", and they are
-    // required by MinIO and by most non-AWS providers.
-    ...(env.S3_ENDPOINT ? { endpoint: env.S3_ENDPOINT } : {}),
-    ...(env.S3_FORCE_PATH_STYLE ? { forcePathStyle: true } : {}),
   },
 })
 
-// `disableLocalStorage` is deliberately NOT hard-coded on either collection:
-// "When enabled, this package will automatically set disableLocalStorage to true
-// for each collection", so the same config works both ways.
+// `disableLocalStorage` is deliberately NOT hard-coded on either collection: the
+// plugin sets it to `true` for targeted collections when it is enabled, and
+// leaves local disk alone when it is not, so the same config works both ways.

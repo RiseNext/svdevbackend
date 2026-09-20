@@ -46,6 +46,13 @@ services:
     env_file: [.env.production]
     environment:
       # The DDL-capable role, used ONLY here.
+      #
+      # 🔴 ON NEON THIS MUST ALSO BE THE **DIRECT** ENDPOINT, not the pooled one.
+      # Neon's pooler is PgBouncer in transaction mode; Payload runs migrations
+      # inside a transaction and issues DDL, which transaction pooling does not
+      # reliably carry. The app service above keeps the POOLED endpoint.
+      # Two independent reasons — least privilege and pooling mode — land on the
+      # same split, which is why it costs no extra variable.
       DATABASE_URL: ${MIGRATE_DATABASE_URL}
     command: ['npm', 'run', 'migrate']
 

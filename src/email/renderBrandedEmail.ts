@@ -1,3 +1,5 @@
+import { DEFAULT_SITE_NAME } from '@/lib/constants'
+
 import { escapeHtml } from './escapeHtml'
 
 /**
@@ -20,6 +22,15 @@ export type BrandedEmailArgs = {
   rows?: [string, string][]
   footer?: string
 }
+
+/**
+ * Last-resort footer, used only when the caller supplies none.
+ *
+ * The company name is CMS data (`site-settings.name`). `renderLeadEmail` reads
+ * it and passes a real footer in; this default exists so a template can still
+ * render if that lookup fails. See DEFAULT_SITE_NAME.
+ */
+const DEFAULT_FOOTER = `Sent automatically by the ${DEFAULT_SITE_NAME} website.`
 
 export const renderBrandedEmail = (args: BrandedEmailArgs): string => {
   const rows = (args.rows ?? [])
@@ -44,7 +55,7 @@ export const renderBrandedEmail = (args: BrandedEmailArgs): string => {
           ${args.intro ? `<p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#4a4a4a">${escapeHtml(args.intro)}</p>` : ''}
           ${rows ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e8e6e3;margin-top:8px">${rows}</table>` : ''}
           ${args.bodyHtml ?? ''}
-          <p style="margin:28px 0 0;padding-top:16px;border-top:1px solid #e8e6e3;font-size:12px;color:#8a8a8a">${escapeHtml(args.footer ?? 'Sent automatically by the SV Developers website.')}</p>
+          <p style="margin:28px 0 0;padding-top:16px;border-top:1px solid #e8e6e3;font-size:12px;color:#8a8a8a">${escapeHtml(args.footer ?? DEFAULT_FOOTER)}</p>
         </td></tr>
       </table>
     </td></tr>
@@ -68,6 +79,6 @@ export const renderPlainEmail = (args: BrandedEmailArgs): string => {
       .replace(/&#39;/g, "'")
     lines.push(`${label}: ${plain || '-'}`)
   }
-  lines.push('', args.footer ?? 'Sent automatically by the SV Developers website.')
+  lines.push('', args.footer ?? DEFAULT_FOOTER)
   return lines.join('\n')
 }

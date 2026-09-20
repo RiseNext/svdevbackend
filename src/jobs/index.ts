@@ -70,13 +70,40 @@ export const sendLeadNotification: TaskConfig<'sendLeadNotification'> = {
       createdAt: String(lead.createdAt),
     }
 
+    /**
+     * The company name comes from the CMS, not from a literal in the template.
+     * A rename in Site Settings must reach the sales inbox too, or the one
+     * artefact the business sees every day is the one that keeps the old name.
+     *
+     * 🔴 WRAPPED, AND THE FALLBACK IS LOAD-BEARING. This is the most
+     * business-critical path in the system: a cosmetic lookup must never be able
+     * to fail a lead notification. If the global is unreachable the email still
+     * goes out, with the template's own default footer.
+     */
+    let siteName: string | undefined
+    try {
+      const settings = await req.payload.findGlobal({
+        slug: 'site-settings',
+        depth: 0,
+        overrideAccess: true,
+        req,
+        select: { name: true },
+      })
+      siteName = (settings as { name?: string } | null)?.name || undefined
+    } catch (err) {
+      req.payload.logger.warn(
+        { err },
+        'could not read site-settings for the lead email footer — sending with the default',
+      )
+    }
+
     let result: unknown
     try {
       result = await req.payload.sendEmail({
         to,
         subject: `New enquiry — ${leadLike.projectNameSnapshot ?? 'general'} — ${leadLike.name}`,
-        html: renderLeadEmail(leadLike),
-        text: renderLeadEmailText(leadLike),
+        html: renderLeadEmail(leadLike, siteName),
+        text: renderLeadEmailText(leadLike, siteName),
       })
     } catch (err) {
       throw new Error(

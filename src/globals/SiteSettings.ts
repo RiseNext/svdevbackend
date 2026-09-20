@@ -65,7 +65,7 @@ export const SiteSettings: GlobalConfig = {
               maxLength: LIMITS.siteName,
               admin: {
                 description:
-                  '🔶 UNRESOLVED: the repository says "SV Developers"; the brief and the live site say "SRR Developers Pvt. Ltd." This renders in every heading, every search-result title, the footer wordmark and the WhatsApp message template.',
+                  'The public trading name. Renders in every page heading, every search-result title, the footer wordmark, the navigation bar and the sales notification email. ✅ RESOLVED 20 Sep 2026 (OQ-6): "SV Developers" — an owner decision, which supersedes the "SRR Developers Pvt. Ltd." that appears in the original brief.',
               },
             },
             {
@@ -75,7 +75,7 @@ export const SiteSettings: GlobalConfig = {
               maxLength: LIMITS.siteName,
               admin: {
                 description:
-                  'The registered entity name, used in the copyright line. A DISTINCT FIELD with a distinct use — answering the naming question above must not silently change both.',
+                  '🔶 STILL OPEN. The REGISTERED ENTITY name, used only in the copyright line — a DISTINCT FIELD with a distinct use, which is why resolving the public name above did not silently change this one. It currently mirrors the trading name because no registered entity name has been supplied. If the company is registered as "… Pvt. Ltd.", enter that exact string here; it is the only place the footer copyright reads from.',
               },
             },
             { name: 'tagline', type: 'text', maxLength: LIMITS.siteTagline },

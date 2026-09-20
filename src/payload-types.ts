@@ -233,6 +233,8 @@ export interface Media {
     hasNextPage?: boolean;
     totalDocs?: number;
   };
+  prefix?: string | null;
+  _objectKey?: string | null;
   updatedAt: string;
   createdAt: string;
   deletedAt?: string | null;
@@ -668,6 +670,8 @@ export interface Document {
   originalFilename?: string | null;
   uploadedBy?: (string | null) | User;
   supersededFilenames?: string[] | null;
+  prefix?: string | null;
+  _objectKey?: string | null;
   updatedAt: string;
   createdAt: string;
   deletedAt?: string | null;
@@ -1090,6 +1094,8 @@ export interface MediaSelect<T extends boolean = true> {
   usedInGallery?: T;
   usedAsLayout?: T;
   usedAsLocationMap?: T;
+  prefix?: T;
+  _objectKey?: T;
   updatedAt?: T;
   createdAt?: T;
   deletedAt?: T;
@@ -1126,6 +1132,8 @@ export interface DocumentsSelect<T extends boolean = true> {
   originalFilename?: T;
   uploadedBy?: T;
   supersededFilenames?: T;
+  prefix?: T;
+  _objectKey?: T;
   updatedAt?: T;
   createdAt?: T;
   deletedAt?: T;
@@ -1383,11 +1391,11 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
 export interface SiteSetting {
   id: string;
   /**
-   * 🔶 UNRESOLVED: the repository says "SV Developers"; the brief and the live site say "SRR Developers Pvt. Ltd." This renders in every heading, every search-result title, the footer wordmark and the WhatsApp message template.
+   * The public trading name. Renders in every page heading, every search-result title, the footer wordmark, the navigation bar and the sales notification email. ✅ RESOLVED 20 Sep 2026 (OQ-6): "SV Developers" — an owner decision, which supersedes the "SRR Developers Pvt. Ltd." that appears in the original brief.
    */
   name: string;
   /**
-   * The registered entity name, used in the copyright line. A DISTINCT FIELD with a distinct use — answering the naming question above must not silently change both.
+   * 🔶 STILL OPEN. The REGISTERED ENTITY name, used only in the copyright line — a DISTINCT FIELD with a distinct use, which is why resolving the public name above did not silently change this one. It currently mirrors the trading name because no registered entity name has been supplied. If the company is registered as "… Pvt. Ltd.", enter that exact string here; it is the only place the footer copyright reads from.
    */
   legalName: string;
   tagline?: string | null;

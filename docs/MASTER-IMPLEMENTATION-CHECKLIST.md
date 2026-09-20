@@ -1,5 +1,14 @@
 # MASTER-IMPLEMENTATION-CHECKLIST.md
 
+> ## 🔶 SUPERSEDED IN PART — owner decision pass, 20 September 2026
+>
+> Every **S3 / bucket / CDN / `media.<domain>`** item below is superseded:
+> production media is **Cloudinary** (D-123) and production Postgres is **Neon**
+> (D-124). The full mapping is in the banner at the top of
+> [`MASTER-IMPLEMENTATION-PLAN.md`](./MASTER-IMPLEMENTATION-PLAN.md); what must
+> actually be configured is in
+> [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md).
+
 > ## 🟢 IMPLEMENTATION STATUS — 20 September 2026
 >
 > **The backend is BUILT and the frontend is INTEGRATED.** This checklist was

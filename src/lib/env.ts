@@ -29,13 +29,10 @@ const parsed = envSchema.safeParse({
   DATABASE_URL: process.env.DATABASE_URL,
   DATABASE_SSL: process.env.DATABASE_SSL,
 
-  S3_BUCKET: process.env.S3_BUCKET || undefined,
-  S3_REGION: process.env.S3_REGION || undefined,
-  S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID || undefined,
-  S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY || undefined,
-  S3_ENDPOINT: process.env.S3_ENDPOINT || undefined,
-  S3_FORCE_PATH_STYLE: process.env.S3_FORCE_PATH_STYLE,
-  CDN_BASE_URL: process.env.CDN_BASE_URL || undefined,
+  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || undefined,
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY || undefined,
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || undefined,
+  CLOUDINARY_DELIVERY_BASE_URL: process.env.CLOUDINARY_DELIVERY_BASE_URL || undefined,
 
   SMTP_HOST: process.env.SMTP_HOST || undefined,
   SMTP_PORT: process.env.SMTP_PORT || undefined,
@@ -71,9 +68,6 @@ export const env: Readonly<Env> = Object.freeze(parsed.data)
 
 export const isProduction = env.NODE_ENV === 'production'
 export const isTest = env.NODE_ENV === 'test'
-
-/** S3 is enabled by the presence of a bucket name, and by nothing else. */
-export const s3Enabled = Boolean(env.S3_BUCKET)
 
 /**
  * OQ-24 gate. `POST /api/v1/leads` must not accept submissions in production

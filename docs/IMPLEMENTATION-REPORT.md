@@ -2,6 +2,18 @@
 
 **Run date:** 20 September 2026 · **Scope:** the complete approved implementation plan, from an empty `svbackend/` through to an integrated frontend.
 
+> ### 🔶 A LATER PASS CHANGED SOME OF THIS — 20 September 2026
+>
+> This report describes the system **as built**, against an S3 storage
+> assumption and with the company name still an open question. An owner decision
+> pass followed it. Where this report says S3, `CDN_BASE_URL` or "OQ-6 open", the
+> current system uses **Cloudinary** (D-123), **Neon PostgreSQL** (D-124) and the
+> name **"SV Developers"** (D-122).
+>
+> **This document is not retro-edited** — it is the record of that run. The
+> current state is [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md); the
+> decisions are `DECISIONS.md` D-122 … D-127.
+
 ---
 
 ## 1. Final status

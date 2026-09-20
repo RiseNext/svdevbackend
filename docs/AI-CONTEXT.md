@@ -1,7 +1,10 @@
 # AI-CONTEXT.md — Master context for SV Developers backend
 
 > **Read this first, every session.** It is the authoritative orientation document.
-> Last updated: **20 September 2026 (post-implementation)** · Status: **BUILT — the backend exists, the D-015 gate PASSED, the frontend is integrated**
+> Last updated: **20 September 2026 (owner decision pass)** · Status: **BUILT and CONFIGURED — the backend exists, the D-015 gate PASSED, the frontend is integrated, production targets are chosen**
+>
+> 🟢 **Owner decisions, 20 Sep 2026** — company name **SV Developers** (D-122, closes OQ-6) · media storage **Cloudinary** (D-123, closes OQ-7a, replaces S3) · database **Neon PostgreSQL** (D-124) · the **domain and privacy-policy URL are deliberately still open** (D-125, OQ-24).
+> **What to set before go-live, and what is still waiting on the owner:** [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md).
 >
 > 🟢 **What was actually built, measured rather than assumed:** [`PHASE-1-GATE-REPORT.md`](./PHASE-1-GATE-REPORT.md). It records four silent defects the gate caught, and every previously-unverified Payload behaviour that is now measured. **Read it before trusting a `NOT VERIFIED IN OFFICIAL DOCS` marker anywhere in this set — several are now resolved.**
 > **Primary execution blueprint:** [`MASTER-IMPLEMENTATION-PLAN.md`](./MASTER-IMPLEMENTATION-PLAN.md) · See §11b for the corrections that change what gets built, §12 for the source-of-truth hierarchy, and §12b for the binding safety rules.
@@ -46,9 +49,9 @@ svfrontend (Next.js, static/ISR)
 Custom public endpoints ──► toPublicProject() serialiser  (exact documented shape)
       ▼
 Payload CMS 3  ──► auto-generated admin UI + media library
-      ├──► PostgreSQL              (Payload-managed schema)
-      ├──► S3-compatible storage   (provider still OQ-7)
-      └──► Email                   (queued lead notifications)
+      ├──► PostgreSQL / Neon       (Payload-managed schema — D-124)
+      ├──► Cloudinary              (media — D-123, custom adapter)
+      └──► Email                   (queued lead notifications — provider OQ-7b)
 ```
 
 **Stack:** TypeScript · **Node ≥ 20.9.0** *(Node 24.11.0 in use — see §11b #5; **not** "Node 20 LTS", and the frontend's `<23` pin must not be copied)* · Payload CMS 3 (MIT, self-hosted) hosted in its own Next.js app **separate from `svfrontend`**, pinned to **`next@16.3.3`** *(§11b #1 — the frontend's 15.5.x is unsupported by Payload)* · PostgreSQL 15+ via Payload's Postgres adapter · Payload/Drizzle migrations · S3-compatible storage · Zod for custom endpoints · Vitest + contract tests · **npm** *(yarn 1.x is unsupported; pnpm not installed)*.
@@ -142,8 +145,9 @@ The admin backend can change what the public website says about legally-regulate
 | Backend code | ✅ **BUILT.** Payload 3.90.1 + Next 16.3.3 + PostgreSQL 15. 9 collections + 1 global, 50 physical tables, 7 public endpoints, 2 probes, 89 passing tests |
 | Backend docs | ✅ This set (21 documents) |
 | Database | ✅ Created. Migrations 001 (schema) + 002 (consent CHECK), reversibility proven up→down→up |
-| Hosting | ❌ Not provisioned — an owner decision. `Dockerfile`, `docker-compose.prod.yml` and `RUNBOOK.md` are ready |
-| Next step | **Owner deliverables** — see `OPEN-QUESTIONS.md` and the Remaining Decisions section of the final report. Nothing engineering-side blocks; four owner items block LAUNCH |
+| Production targets | ✅ **CHOSEN 20 Sep 2026** — **Neon PostgreSQL** (D-124) + **Cloudinary** (D-123). Code, env schema and docs all reflect it; no migration was needed |
+| Hosting | ❌ Not provisioned. `Dockerfile`, `docker-compose.prod.yml`, `RUNBOOK.md` and `PRODUCTION-CONFIG.md` are ready |
+| Next step | **Owner deliverables** — see [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §4–§6. Nothing engineering-side blocks. Still open: the **domain**, the **privacy-policy URL**, **testimonials**, all `[BRACKETED]` values, the **registered legal entity name**, and the email provider |
 
 ### 11b. Corrections established 20 September 2026
 

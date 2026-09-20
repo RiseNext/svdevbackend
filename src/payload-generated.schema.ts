@@ -245,6 +245,8 @@ export const media = pgTable(
     uploadedBy: uuid("uploaded_by_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    prefix: varchar("prefix").default("media"),
+    _objectKey: varchar("_objectkey"),
     updatedAt: timestamp("updated_at", {
       mode: "string",
       withTimezone: true,
@@ -324,6 +326,8 @@ export const documents = pgTable(
     uploadedBy: uuid("uploaded_by_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    prefix: varchar("prefix").default("documents"),
+    _objectKey: varchar("_objectkey"),
     updatedAt: timestamp("updated_at", {
       mode: "string",
       withTimezone: true,

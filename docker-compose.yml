@@ -29,42 +29,21 @@ services:
       timeout: 5s
       retries: 20
 
-  # S3-compatible storage for local development — OPT-IN.
-  #
-  # The documented dev path is to leave S3_BUCKET EMPTY in .env: the s3Storage
-  # plugin is still registered (never conditionally included — a config whose
-  # SHAPE varies by environment generates divergent migrations) but stays inert,
-  # and uploads fall back to local disk at svbackend/media/.
-  #
-  # Start it only when you want to exercise the real S3 code path:
-  #   docker compose --profile s3 up -d
-  #   then set in .env:  S3_BUCKET=sv-media  S3_ENDPOINT=http://localhost:9000
-  #                      S3_FORCE_PATH_STYLE=true  S3_ACCESS_KEY_ID=minioadmin
-  #                      S3_SECRET_ACCESS_KEY=minioadmin
-  #                      CDN_BASE_URL=http://localhost:9000/sv-media
-  #
-  # NOTE: docker.io/minio/minio now requires authentication to pull. quay.io is
-  # MinIO's other official registry and pulls anonymously.
-  minio:
-    profiles: ['s3']
-    image: quay.io/minio/minio:latest
-    container_name: sv-dev-minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - '9000:9000'
-      - '9001:9001'
-    volumes:
-      - sv-dev-minio:/data
-    healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
-      interval: 10s
-      timeout: 5s
-      retries: 10
+# =============================================================================
+# THERE IS NO LOCAL OBJECT-STORAGE SERVICE, AND THAT IS DELIBERATE.
+#
+# Production media lives in Cloudinary (owner decision, 20 Sep 2026), which has
+# no self-hostable local equivalent — the MinIO `s3` profile that used to sit
+# here existed only to exercise the S3 code path and is now dead weight.
+#
+# The local development path is to leave CLOUDINARY_CLOUD_NAME EMPTY in .env:
+# the storage plugin is still registered (never conditionally included — a
+# config whose SHAPE varies by environment generates divergent migrations) but
+# stays inert, and uploads fall back to local disk at svbackend/media/.
+#
+# To exercise the real Cloudinary path locally, point .env at a Cloudinary
+# development cloud. It is a hosted service; there is nothing to start here.
+# =============================================================================
 
 volumes:
   sv-dev-pgdata:
-  sv-dev-minio:

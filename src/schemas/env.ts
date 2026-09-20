@@ -54,14 +54,20 @@ export const envSchema = z
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
     DATABASE_SSL: bool.default(false),
 
-    // ---- Storage: all optional; S3_BUCKET is the enable switch -------------
-    S3_BUCKET: z.string().min(1).optional(),
-    S3_REGION: z.string().min(1).optional(),
-    S3_ACCESS_KEY_ID: z.string().min(1).optional(),
-    S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
-    S3_ENDPOINT: z.string().url().optional(),
-    S3_FORCE_PATH_STYLE: bool.default(false),
-    CDN_BASE_URL: z.string().url().optional(),
+    // ---- Storage: Cloudinary ------------------------------------------------
+    // All optional here; CLOUDINARY_CLOUD_NAME is the enable switch and the
+    // production superRefine below makes the set mandatory where it matters.
+    // Leaving them empty is the LOCAL DEVELOPMENT path: the storage plugin goes
+    // inert and Payload writes to local disk.
+    CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
+    CLOUDINARY_API_KEY: z.string().min(1).optional(),
+    CLOUDINARY_API_SECRET: z.string().min(1).optional(),
+    // Optional override for a private CDN distribution or a custom delivery
+    // hostname. Defaults to https://res.cloudinary.com/<cloud name>.
+    // An ORIGIN, not a URL with a path: a trailing path segment would be
+    // silently concatenated into every asset URL and 404 the entire media
+    // library, which is why this is the stricter check.
+    CLOUDINARY_DELIVERY_BASE_URL: originUrl.optional(),
 
     // ---- Email -------------------------------------------------------------
     SMTP_HOST: z.string().min(1).optional(),
@@ -91,17 +97,43 @@ export const envSchema = z
     PRIVACY_POLICY_URL: z.string().url().optional(),
   })
   .superRefine((v, ctx) => {
-    // Production-only requirements live HERE, not in the base schema. A base-schema
-    // `required` on S3_BUCKET would make local disk storage impossible; `.optional()`
+    // ---- ALL ENVIRONMENTS ---------------------------------------------------
+    // 🔴 PARTIAL STORAGE CONFIGURATION IS WORSE THAN NONE, and this is the only
+    // check that catches it. `cloudinaryEnabled` keys off the cloud name alone;
+    // a cloud name with a missing API secret would therefore enable the plugin
+    // and fail on the FIRST UPLOAD rather than at boot. A missing cloud name
+    // with the keys present is the mirror image: storage silently falls back to
+    // local disk, uploads appear to work, and every file is lost on redeploy.
+    const cloudinaryKeys = [
+      'CLOUDINARY_CLOUD_NAME',
+      'CLOUDINARY_API_KEY',
+      'CLOUDINARY_API_SECRET',
+    ] as const
+    const cloudinarySet = cloudinaryKeys.filter((k) => v[k])
+    if (cloudinarySet.length > 0 && cloudinarySet.length < cloudinaryKeys.length) {
+      for (const key of cloudinaryKeys) {
+        if (!v[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} is required once any CLOUDINARY_* variable is set — a partially configured media store fails on the first upload, not at boot`,
+          })
+        }
+      }
+    }
+
+    // ---- PRODUCTION ONLY ----------------------------------------------------
+    // These live HERE, not in the base schema. A base-schema `required` on the
+    // Cloudinary keys would make local disk storage impossible; `.optional()`
     // everywhere would leave production unguarded. The split is the point.
     if (v.NODE_ENV !== 'production') return
 
     const requiredInProd = [
-      'S3_BUCKET',
-      'S3_REGION',
-      'S3_ACCESS_KEY_ID',
-      'S3_SECRET_ACCESS_KEY',
-      'CDN_BASE_URL',
+      // Media MUST be in Cloudinary in production. Local disk on a container
+      // host means every uploaded asset is destroyed by the next deploy.
+      'CLOUDINARY_CLOUD_NAME',
+      'CLOUDINARY_API_KEY',
+      'CLOUDINARY_API_SECRET',
       // The email boot guard. With no adapter configured, Payload logs a warning
       // and the send silently APPEARS TO SUCCEED. For a lead-generation product,
       // reporting success while sending nothing is the only truly unacceptable
@@ -154,13 +186,10 @@ export const ENV_KEYS = [
   'CSRF_ORIGINS',
   'DATABASE_URL',
   'DATABASE_SSL',
-  'S3_BUCKET',
-  'S3_REGION',
-  'S3_ACCESS_KEY_ID',
-  'S3_SECRET_ACCESS_KEY',
-  'S3_ENDPOINT',
-  'S3_FORCE_PATH_STYLE',
-  'CDN_BASE_URL',
+  'CLOUDINARY_CLOUD_NAME',
+  'CLOUDINARY_API_KEY',
+  'CLOUDINARY_API_SECRET',
+  'CLOUDINARY_DELIVERY_BASE_URL',
   'SMTP_HOST',
   'SMTP_PORT',
   'SMTP_SECURE',

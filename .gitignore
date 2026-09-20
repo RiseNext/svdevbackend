@@ -9,6 +9,12 @@
 # point the suite elsewhere. REVIEW ANY CHANGE TO IT: a real value here is a
 # leaked value.
 !.env.test
+# .env.ci.example is committed for the same reason, and was previously excluded
+# by ACCIDENT: `.env.*` matched it and no negation followed, so README.md and
+# RUNBOOK.md both referenced a file that was never in the repository and a fresh
+# clone could not run `npm run build`. It holds only `.invalid` dummy values.
+# 🔴 `.env.ci` itself — the filled-in copy — stays ignored.
+!.env.ci.example
 
 # --- Node / Next -----------------------------------------------------------
 node_modules/

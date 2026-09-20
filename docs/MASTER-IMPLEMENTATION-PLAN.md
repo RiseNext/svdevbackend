@@ -4,6 +4,31 @@
 > Produced: 20 September 2026 · Status: **investigation complete — no implementation performed**
 > Supersedes `BACKEND-ROADMAP.md` on phase structure. Does **not** supersede `IMPLEMENTATION-DECISION.md` (D-015), which it confirms.
 
+> ### 🔶 SUPERSEDED IN PART — owner decision pass, 20 September 2026
+>
+> This plan was written against an **S3-compatible storage** assumption and a
+> **vendor-unspecified** managed PostgreSQL, because both were open questions at
+> the time (OQ-7a). The owner has since decided. **Wherever this document says
+> S3, `@payloadcms/storage-s3`, `S3_BUCKET`, `CDN_BASE_URL`, a bucket, a CDN
+> origin or a `media.<domain>` subdomain, the current system does something
+> different:**
+>
+> | The plan says | The system does | Recorded as |
+> |---|---|---|
+> | `@payloadcms/storage-s3` | A hand-written Cloudinary adapter on `@payloadcms/plugin-cloud-storage`. The S3 package is **removed** | **D-123** |
+> | `S3_BUCKET` · `S3_REGION` · `S3_ACCESS_KEY_ID` · `S3_SECRET_ACCESS_KEY` · `S3_ENDPOINT` · `S3_FORCE_PATH_STYLE` · `CDN_BASE_URL` | `CLOUDINARY_CLOUD_NAME` · `CLOUDINARY_API_KEY` · `CLOUDINARY_API_SECRET` · `CLOUDINARY_DELIVERY_BASE_URL` | D-123 |
+> | A bucket + a CDN + a `media.<domain>` record | Cloudinary's own delivery host. **No media DNS record** | **D-125** |
+> | Managed PostgreSQL, vendor TBD | **Neon PostgreSQL**, pooled endpoint for the app and direct for migrations | **D-124** |
+> | OQ-6 company name unresolved | **"SV Developers"** | **D-122** |
+>
+> **The plan's §22 environment table and §20 deployment steps are the parts most
+> affected.** Everything else — the schema, the access model, the serialisers,
+> the upload guards, the job design — is unchanged and still accurate, because
+> storage is the last step in the media pipeline and the provider swap could not
+> reach any of it.
+>
+> **Current production configuration:** [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md).
+
 ---
 
 ## What this document is

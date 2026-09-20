@@ -2,6 +2,13 @@
 
 Unresolved decisions. **Do not guess — ask.** When resolved, move the answer to `DECISIONS.md` and update every affected document.
 
+> ### ✅ Owner decision pass — 20 September 2026
+>
+> **CLOSED:** **OQ-6** (company name → "SV Developers", D-122) · **OQ-7a** (storage → Cloudinary, D-123).
+> **ALSO DECIDED:** production database → **Neon PostgreSQL** (D-124).
+>
+> **STILL OPEN, confirmed by the owner rather than assumed:** the **final domain** (D-125 — deliberately not chosen; all eleven places that need it are enumerated in [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §4) · **OQ-24** (privacy policy — URL not yet known, safeguard untouched) · **OQ-23** (testimonials — none invented, to be entered through Admin) · **OQ-22** (`[BRACKETED]` values) · **OQ-7b** (email provider) · and the **registered legal entity name** (see OQ-6 below).
+
 **Impact:** 🔴 blocks implementation · 🟠 blocks launch · 🟡 shapes design · ⚪ informational
 
 ---
@@ -13,15 +20,15 @@ Unresolved decisions. **Do not guess — ask.** When resolved, move the answer t
 | Class | Meaning | IDs |
 |---|---|---|
 | **BLOCKING MIGRATION** | Must be settled before migration 001 runs | **OQ-25** *(multilingual — safe default applied; see [`MIGRATION-001-DECISIONS.md`](./MIGRATION-001-DECISIONS.md) §5)* |
-| **BLOCKING IMPLEMENTATION** | Blocks a specific phase's work, not the whole build | **OQ-1**, **OQ-2** *(Phase 5 — leads destination + a literal recipient address)* · **OQ-7a** *(storage provider — Phase 6, the S3 adapter task only)* · **OQ-18** *(brochure gating — a mutually-exclusive config fork, before the storage task is written)* |
-| **BLOCKING LAUNCH** | Blocks go-live. **Blocks no line of code.** | **OQ-6** *(company name)* · **OQ-22** *(all `[BRACKETED]` placeholders)* · **OQ-23** *(testimonials)* · **OQ-24** *(privacy policy — **the only one with legal exposure**)* · **OQ-7b** *(email sending domain + SPF/DKIM/DMARC)* |
+| **BLOCKING IMPLEMENTATION** | Blocks a specific phase's work, not the whole build | **OQ-1**, **OQ-2** *(Phase 5 — leads destination + a literal recipient address)* · **OQ-18** *(brochure gating — a mutually-exclusive config fork)* · ~~OQ-7a~~ ✅ *closed 20 Sep 2026 → Cloudinary, D-123* |
+| **BLOCKING LAUNCH** | Blocks go-live. **Blocks no line of code.** | **OQ-22** *(all `[BRACKETED]` placeholders)* · **OQ-23** *(testimonials)* · **OQ-24** *(privacy policy — **the only one with legal exposure**)* · **OQ-7b** *(email sending domain + SPF/DKIM/DMARC)* · **the final domain** *(D-125)* · **the registered legal entity name** *(the unclosed half of OQ-6)* · ~~OQ-6 company name~~ ✅ *closed 20 Sep 2026 → "SV Developers", D-122* |
 | **NON-BLOCKING** | Shapes design; a safe default exists and is applied | **OQ-3** *(lead pipeline — control **not built**)* · **OQ-4** *(single role)* · **OQ-8** *(password reset)* · **OQ-9** *(slug lock)* · **OQ-11** *(hero headline stays in code)* · **OQ-12** *(`noindex` stays in code)* · **OQ-15** *(placeholder awareness)* · **OQ-19** *(phone digits — **interim ≥8**, see below)* · **OQ-20** *(autoresponder — no)* |
 | **DEFERRED** | Explicitly out of scope; recorded, not built | **OQ-5** *(who builds custom admin components — zero built through Phase 8)* · **OQ-10** *(count-coupled strings — folded into Phase 9)* · **OQ-13** *(no `Service` entity)* · **OQ-14** *(no blog/`Article`)* · **OQ-16** *(no backend image variants)* · **OQ-17** *(media retention — 30-day grace)* |
 | **RESOLVED** | Moved to `DECISIONS.md` | **OQ-21** → D-015 · **OQ-26** → D-029 |
 
-### 🔴 The four that stop launch and that only the owner can answer
+### 🔴 The ones that stop launch and that only the owner can answer
 
-**OQ-6 · OQ-22 · OQ-23 · OQ-24.** None blocks a line of code. **Three have no safe default at all** — engineering cannot invent a company name, a privacy policy, or a real customer quote. **OQ-24 carries actual legal exposure**: the contact form collects name + phone under India's DPDP Act while `[PRIVACY_URL]` is inert.
+**OQ-22 · OQ-23 · OQ-24 · the final domain · the registered legal entity name.** *(OQ-6's company-name half closed on 20 Sep 2026.)* None blocks a line of code. **Most have no safe default at all** — engineering cannot invent a privacy policy, a real customer quote, a domain, or a registered company name. **OQ-24 carries actual legal exposure**: the contact form collects name + phone under India's DPDP Act while `[PRIVACY_URL]` is inert, which is why the lead endpoint refuses production submissions until it is set.
 
 ### ⚠️ OQ-19 — the one place an interim default has a visible cost
 
@@ -67,11 +74,10 @@ The investigation created ten **technical** decisions (OQ-27 … OQ-36) — `idT
 
 > The original question bundled two decisions with **different blocking behaviour**, which is why the roadmap listed it as blocking two phases at once. They are now separate.
 
-#### OQ-7a — Storage provider · **BLOCKING IMPLEMENTATION (Phase 6 only)**
-**Question:** S3 / R2 / Spaces / Cloudinary?
-**Why it matters:** needed for the S3 adapter task. ⚠️ **It does not block the `media` collection** — uploads work against local disk until the adapter is enabled (`s3Storage({ enabled })`), so all media modelling, validation and admin work proceeds without it.
-**Default:** any S3-compatible provider. `@payloadcms/storage-s3` handles non-AWS providers via `config.endpoint` + `forcePathStyle: true`.
-**Affects:** `MEDIA-MANAGEMENT.md` §5, plan §8, §20.
+#### ~~OQ-7a — Storage provider~~ ✅ **RESOLVED — 20 Sep 2026: Cloudinary**
+**Resolution:** **Cloudinary**, an owner decision. Logged as `DECISIONS.md` **D-123**, superseding D-112's S3-shape interim. Configuration in [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §3.
+**What it cost:** Payload publishes no Cloudinary adapter and Cloudinary has no S3-compatible endpoint, so `@payloadcms/storage-s3` was removed and a ~100-line adapter written against the documented `@payloadcms/plugin-cloud-storage` interface. **No migration** — the injected fields are identical.
+**Still outstanding:** the Cloudinary account itself (AWAITING INFRA), and the `Content-Disposition: attachment` deviation recorded in D-123.
 
 #### OQ-7b — Email provider · **NOT blocking implementation · BLOCKING LAUNCH**
 **Question:** Which account, which sending domain, and who configures SPF/DKIM/DMARC?
@@ -89,9 +95,11 @@ The investigation created ten **technical** decisions (OQ-27 … OQ-36) — `idT
 
 ## 🟠 Blocking launch (not backend development)
 
-### OQ-6 — Company name: "SV Developers" or "SRR Developers Pvt. Ltd."?
-`content/site.ts` says *SV Developers*; the brief and live site say *SRR Developers Pvt. Ltd.* The repo deliberately refused to reconcile these by guesswork. Every heading and SEO title renders from `site.name`.
-**Impact:** brand identity across the entire site. One-line fix once decided — but nobody can decide it except the owner.
+### ~~OQ-6 — Company name~~ ✅ **RESOLVED — 20 Sep 2026: "SV Developers"**
+**Resolution:** the public trading name is **SV Developers**, an owner decision, superseding the *SRR Developers Pvt. Ltd.* in the brief and on the live site. Logged as `DECISIONS.md` **D-122**; the consequent code changes are **D-127**.
+**It is CMS data, not a constant:** `site-settings.name`, editable in the Admin Panel. Three places that still rendered it from a literal — three page metadata blocks, the logo component, and the lead-notification email — now read the CMS.
+
+> 🔶 **ONE PART REMAINS OPEN.** `site-settings.legalName` is the **registered entity** name and a distinct field: it is the sole source of the footer copyright line. No registered name was supplied, so it mirrors the trading name. If the company is registered as "… Pvt. Ltd.", that exact string is an owner deliverable.
 
 ### OQ-22 — Replacement of all `[BRACKETED]` placeholders
 Phone, email, WhatsApp, address, domain, approval numbers, RERA registration, statistics, all 11 drive times.
@@ -101,9 +109,13 @@ Phone, email, WhatsApp, address, domain, approval numbers, RERA registration, st
 The three current quotes are **invented placeholders with bracketed names**. The repo is explicit: publishing invented reviews under real-sounding names is a fabricated record.
 **Default:** ship with the section empty rather than with placeholders.
 
-### OQ-24 — Privacy policy
+### OQ-24 — Privacy policy · **STILL OPEN · BLOCKS LAUNCH**
 `[PRIVACY_URL]` is inert, yet the contact form collects name + phone and promises *"We will only use your number to talk to you about this project."*
 **Why it matters:** **collecting PII without a reachable privacy policy is the largest compliance gap in the project** (DPDP Act). Must exist before the form goes live.
+
+**Status at 20 Sep 2026:** confirmed open. The owner has stated the final URL is **not yet known**, so no URL has been invented and no placeholder that could pass for a real one exists anywhere. `PRIVACY_POLICY_URL` stays configurable and **the production safeguard is untouched**: `POST /api/v1/leads` refuses submissions in production while it is unset (`leadCaptureAllowed` in `src/lib/env.ts`).
+
+⚠️ **The sub-processor list the policy must name GREW today.** It now includes **Cloudinary** (media) and **Neon** (the database where lead name and phone are stored), alongside the still-unchosen email provider (OQ-7b). Three separate places must then be set — the env var, the Site Settings legal link, and the `formNote` consent sentence. Enumerated in [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §5.
 
 ---
 

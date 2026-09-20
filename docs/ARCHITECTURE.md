@@ -68,8 +68,8 @@
 | Framework | **Payload CMS 3 on Next.js** (`next@16.3.3`, `react@19.2.6`, exact pins) | D-015. ⚠️ `@payloadcms/next` peers exclude **15.5.x** — the frontend's version. Never match the two (D-016) |
 | Validation | **Zod** | Unchanged. Used for the custom public endpoints and boot-time env validation (NFR-11) |
 | Data layer | **`@payloadcms/db-postgres`** (Drizzle-based) | D-015. Migrations are `payload migrate:*` |
-| Database | **PostgreSQL 15+** | Unchanged |
-| Storage | **S3-compatible** via `@payloadcms/storage-s3` | See `MEDIA-MANAGEMENT.md`. Provider = OQ-7a |
+| Database | **PostgreSQL 15+** — **Neon** in production | D-124 (20 Sep 2026). App uses the POOLED endpoint, the migrate job the DIRECT one. `PRODUCTION-CONFIG.md` §2 |
+| Storage | **Cloudinary** via a hand-written adapter on `@payloadcms/plugin-cloud-storage` | D-123 (20 Sep 2026), closing OQ-7a and superseding D-112's S3 shape. **`@payloadcms/storage-s3` is removed** — Payload publishes no Cloudinary adapter and Cloudinary has no S3-compatible endpoint. `PRODUCTION-CONFIG.md` §3 |
 | Email | **`@payloadcms/email-nodemailer`** | Speaks any SMTP transport, so the provider is an env-var choice (OQ-7b), not an architectural one |
 | Sessions | **Payload auth, `useSessions: true`** (httpOnly cookie, stateful, revocable) | See §6 and D-029 |
 | Admin UI | **Payload's native admin**, generated from config | D-015 — not a separate app |

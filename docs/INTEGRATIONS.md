@@ -10,8 +10,9 @@ Every external service the system touches — what it is for, whether it is requ
 
 | Service | Status | Required for | Secrets | Webhook |
 |---|---|---|---|---|
-| **Transactional email** | ❌ **Must add** | Lead notification (FR-LEAD-05) | API key, from-address | Bounce/complaint (optional) |
-| **Object storage** | ❌ **Must add** | Media (FR-MEDIA-01..13) | Endpoint, bucket, key, secret | No |
+| **Transactional email** | ❌ **Must add** | Lead notification (FR-LEAD-05) | SMTP host/port/user/pass, from-address | Bounce/complaint (optional) |
+| **Object storage — Cloudinary** | ✅ **Decided** (D-123); account AWAITING INFRA | Media (FR-MEDIA-01..13) | Cloud name, API key, API secret | No |
+| **Database — Neon PostgreSQL** | ✅ **Decided** (D-124); project AWAITING INFRA | Everything, incl. **lead PII** | Connection strings (pooled + direct) | No |
 | **WhatsApp deep link** | ✅ Exists (inert) | Hero pill, contact | **None** | No |
 | WhatsApp Business API | ⬜ Optional | Server-sent alerts | Token, phone id | Delivery receipts |
 | SMS | ⬜ Optional | Lead alerts | Provider creds | Delivery status |
@@ -44,13 +45,22 @@ Every external service the system touches — what it is for, whether it is requ
 
 > ⚠️ **Staging must not send real notifications** (`PRD.md` §11). Use a sandbox address or a capture tool.
 
-## 3. Object storage — **required**
+## 3. Object storage — ✅ **DECIDED: Cloudinary** (20 Sep 2026 · D-123)
 
-**Why:** FR-MEDIA-01..13. There is nowhere to put an uploaded image today; everything is committed into `public/`.
+**Why:** FR-MEDIA-01..13.
 
-Full analysis in `MEDIA-MANAGEMENT.md` §5. **Recommendation: S3-compatible storage behind a CDN** — `next/image` already handles optimisation, so a transforming provider is largely redundant at this volume.
+**Provider: Cloudinary**, an owner decision that closed OQ-7a and superseded the S3 recommendation. Implemented as a hand-written adapter on `@payloadcms/plugin-cloud-storage`, because **Payload publishes no Cloudinary adapter** and Cloudinary has no S3-compatible endpoint. Detail in `MEDIA-MANAGEMENT.md` §5 and [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §3.
 
-**Secrets:** `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_PUBLIC_URL`.
+**No transformations are used** — `next/image` already handles optimisation, so Cloudinary is storage and CDN only. That deliberately keeps the coupling to a key prefix and a hostname.
+
+**Secrets:** `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` (+ optional `CLOUDINARY_DELIVERY_BASE_URL`).
+**Webhooks:** none.
+
+## 3b. Database hosting — ✅ **DECIDED: Neon PostgreSQL** (20 Sep 2026 · D-124)
+
+Not previously in this table, because the original list predates the decision to self-host Payload on managed Postgres. It belongs here: it is an external service that holds **lead PII**, which makes it a sub-processor the privacy policy must name (OQ-24).
+
+**Secrets:** `DATABASE_URL` (pooled endpoint, app) and `MIGRATE_DATABASE_URL` (direct endpoint, DDL role).
 **Webhooks:** none.
 
 ## 4. WhatsApp — **exists, currently inert**
@@ -146,7 +156,7 @@ NODE_ENV / LOG_LEVEL / RATE_LIMIT_*
 |---|---|
 | OQ-1 | Do leads go to our DB, a CRM, or email only? Determines whether a CRM integration exists |
 | OQ-2 | Notification channel — email, WhatsApp, SMS, or several? |
-| OQ-7a | Which **storage** provider? Blocks the S3 adapter task only (Phase 6) — not the media collection |
+| ~~OQ-7a~~ | ~~Which **storage** provider?~~ ✅ **RESOLVED 20 Sep 2026 — Cloudinary (D-123)** |
 | OQ-7b | Which **email** provider/sending domain? **Not blocking implementation** — `@payloadcms/email-nodemailer` speaks any SMTP transport, so this is an env-var choice. **Blocks launch** (deliverability, SPF/DKIM/DMARC) |
 | OQ-20 | Autoresponder to the buyer? |
 | ~~OQ-21~~ | ~~Build this CMS, or adopt a headless CMS SaaS?~~ ✅ **RESOLVED 18 Sep 2026 — D-015: adopt Payload CMS 3, self-hosted.** *(This row previously said "should be settled before Phase 1"; it was.)* |

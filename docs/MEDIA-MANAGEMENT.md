@@ -9,7 +9,7 @@
 > | **7 media roles** | The DB/API contract defines **5** (`cover`, `gallery`, `layout`, `location_map`, `brochure`). The site-level `document` role had no table, column or endpoint — it is now a **`documents` upload collection** (D-032), which closes the master-plan-PDF gap |
 > | One `media_assets` table + a `project_media` join | **Two upload collections** — `media` (images) and `documents` (PDFs). `project_media` is **not built**; roles are named `upload` fields on `Project` (D-032) |
 > | §11 migration uploads the existing **SVG** placeholders | 🔴 **Contradiction.** §6 and `SECURITY.md` §10 reject SVG **always**, and `image/svg+xml` is not in the MIME allow-list. The documented migration cannot run through the documented endpoint. Resolution in plan §8: the seed **stores path strings and uploads nothing**; SVG placeholders are never ingested |
-> | Provider choice open (OQ-7) | Still open — now **OQ-7a (storage)**, and it blocks only the S3 adapter task, never the collection |
+> | Provider choice open (OQ-7) | ✅ **CLOSED 20 Sep 2026 — Cloudinary** (owner decision, D-123). See §5 |
 >
 > Payload validates the **declared** MIME type only — magic-byte sniffing is our code.
 >
@@ -84,18 +84,20 @@ These are not preferences — violating them breaks the site.
 
 Single-valued roles enforced by a partial unique index (`DATABASE-SCHEMA.md` §8).
 
-## 5. Storage options — decision required (OQ-7)
+## 5. Storage — ✅ **DECIDED: Cloudinary** (owner, 20 Sep 2026 · D-123)
 
-| Option | Pros | Cons |
-|---|---|---|
-| **S3-compatible object storage** (AWS S3, Cloudflare R2, DigitalOcean Spaces, MinIO) — *recommended* | Portable API, cheap, CDN-frontable, no vendor lock-in beyond a key prefix | Image transforms are your own problem (though `next/image` already does them) |
-| **Managed media provider** (Cloudinary, imgix, Uploadcare) | Transforms, optimisation, CDN built in | Cost scales with traffic; duplicates what `next/image` already does; vendor lock-in |
-| **Local filesystem on the app server** | Trivial | Lost on redeploy, no redundancy, doesn't scale past one instance. **Not recommended beyond local dev** |
-| **Database BLOBs** | Transactional with metadata | Bloats DB and backups, slow to serve. **Not recommended** |
+> The options table that stood here recommended S3-compatible storage and listed Cloudinary under *"Managed media provider"* with the note "duplicates what `next/image` already does; vendor lock-in". **The owner chose Cloudinary.** That recommendation is superseded; the observation behind it is not, and is recorded below so nobody re-litigates it from memory.
 
-**Recommendation: S3-compatible object storage behind a CDN.** The frontend already optimises via `next/image`, so a transforming provider is largely redundant — and the volume here (single-digit projects, a few dozen images) does not justify the cost or the lock-in.
+| | |
+|---|---|
+| **Production** | Cloudinary. `CLOUDINARY_CLOUD_NAME` is the enable switch |
+| **Local development** | Nothing to run. Leave the Cloudinary variables empty and uploads fall back to local disk at `svbackend/media/` |
+| **Implementation** | `src/media/cloudinary.ts` — a hand-written adapter on `@payloadcms/plugin-cloud-storage`. **Payload publishes no Cloudinary adapter**, and Cloudinary exposes no S3-compatible endpoint, so `@payloadcms/storage-s3` could not be repointed and was removed |
+| **Configuration** | [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §3 — storage layout, the image/raw split, and the account checklist |
 
-**Do not select a provider without an explicit decision.** Record it in `DECISIONS.md`.
+**What the earlier recommendation got right, and which still applies:** the frontend optimises through `next/image`, so **no Cloudinary transformation is used**. The adapter stores and serves original bytes and nothing else. That keeps the lock-in to a key prefix and a hostname — the same surface an S3 bucket would have had — and it is why moving away later would be a re-upload, not a rewrite.
+
+**What changed as a result:** no MinIO service in `docker-compose.yml`, no bucket to provision, no CDN to put in front, and **no `media.<domain>` DNS record** (D-125).
 
 ## 6. Upload validation — FR-MEDIA-02
 
@@ -129,6 +131,8 @@ This prevents path traversal, collisions, case-sensitivity bugs across platforms
 
 Public URL must be stable and CDN-cacheable. Because the key contains a UUID, content is immutable → `Cache-Control: public, max-age=31536000, immutable`.
 
+> **Under Cloudinary (D-123) the URL is** `<base>/image/upload/media/<uuid>.<ext>` for images and `<base>/raw/upload/documents/<uuid>.pdf` for PDFs, with **no version component** — Cloudinary's docs make the version optional and needed only on overwrite, and this system never overwrites. The cache policy is Cloudinary's; the immutability that makes a long max-age safe is ours, and rests on the UUID key. Composition lives in **one** function, `cloudinaryFileUrl()`, called by both the storage adapter and the public serialiser so the stored URL and the emitted `ImageRef.src` cannot drift.
+
 **Replace (FR-MEDIA-07) writes a NEW key and updates `public_url`**, rather than overwriting — otherwise CDN caches serve the old bytes for a year. The attachment rows keep pointing at the same `media_asset` record, so nothing breaks.
 
 If the storage bucket is private, serve through a backend proxy or signed URLs — but **public marketing images should simply be public**; signing them adds latency and breaks `next/image` caching for no security gain.
@@ -149,10 +153,10 @@ If the storage bucket is private, serve through a backend proxy or signed URLs �
 
 - **No public upload endpoint** (FR-MEDIA-12). Uploads require a session.
 - Rate-limit uploads per session.
-- Serve from a **separate origin/subdomain** (e.g. `cdn.example.com`) so uploaded content cannot script against the app origin.
+- Serve from a **separate origin/subdomain** so uploaded content cannot script against the app origin. ✅ **Satisfied, and more strongly than planned**: Cloudinary's delivery host is a different *registrable domain*, not a sibling subdomain.
 - `X-Content-Type-Options: nosniff` on all media responses.
-- `Content-Disposition: attachment` for PDFs and any non-image (the frontend already sets this pattern for SVG).
-- Never echo absolute filesystem paths or bucket names in errors.
+- ⚠️ `Content-Disposition: attachment` for PDFs — **NOT SATISFIED under Cloudinary, and not claimed.** This was an S3 bucket-policy line; Cloudinary sets its own delivery headers for `raw` assets and they are not configurable per object from here. The separate-origin control above is what the requirement was defending, and it holds. Recorded in D-123 rather than quietly dropped.
+- Never echo absolute filesystem paths, bucket names or cloud names in errors.
 
 ## 11. Migration of existing assets
 
@@ -166,7 +170,7 @@ If the storage bucket is private, serve through a backend proxy or signed URLs �
 
 | ID | Question |
 |---|---|
-| OQ-7 | Which storage provider? |
-| OQ-16 | Does the backend generate responsive variants, or is `next/image` alone sufficient? *(Recommendation: `next/image` alone.)* |
+| ~~OQ-7~~ | ~~Which storage provider?~~ ✅ **RESOLVED 20 Sep 2026 — Cloudinary (D-123)** |
+| OQ-16 | Does the backend generate responsive variants, or is `next/image` alone sufficient? *(Recommendation: `next/image` alone — and this is now settled in practice: no Cloudinary transformation is used.)* |
 | OQ-17 | Retention for replaced/deleted assets — is 30 days right? |
 | OQ-18 | Should brochure PDFs be public, or gated behind a lead capture? *(Currently public via the Lightbox download button.)* |

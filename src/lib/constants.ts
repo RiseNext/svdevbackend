@@ -11,6 +11,24 @@
  */
 
 // ---------------------------------------------------------------------------
+// Business identity
+// ---------------------------------------------------------------------------
+
+/**
+ * 🔴 THIS IS A FALLBACK, NOT THE COMPANY NAME.
+ *
+ * The company name is CMS data: `site-settings.name`, edited in the Admin
+ * Panel, resolved by the owner on 20 Sep 2026 (OQ-6) to "SV Developers". This
+ * constant exists for the ONE place that cannot read the database — the email
+ * templates, when the `site-settings` lookup itself fails — so that a cosmetic
+ * footer can never fail a lead notification.
+ *
+ * Anything that CAN read the CMS must read the CMS. Adding a second consumer of
+ * this constant is almost certainly a mistake: check `site-settings` first.
+ */
+export const DEFAULT_SITE_NAME = 'SV Developers'
+
+// ---------------------------------------------------------------------------
 // Phone — D-114 / OQ-19
 // ---------------------------------------------------------------------------
 
