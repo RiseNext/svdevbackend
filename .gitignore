@@ -2,6 +2,13 @@
 .env
 .env.*
 !.env.example
+# .env.test is committed DELIBERATELY. It contains ONLY dummy values pointing at
+# the disposable test container on port 5433 — no secret, no real host, no real
+# credential. Committing it is what makes `npm test` work from a fresh clone.
+# Any variable already in the process environment overrides it, so CI can still
+# point the suite elsewhere. REVIEW ANY CHANGE TO IT: a real value here is a
+# leaked value.
+!.env.test
 
 # --- Node / Next -----------------------------------------------------------
 node_modules/

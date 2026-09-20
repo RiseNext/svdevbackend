@@ -3,6 +3,7 @@ import type { CollectionConfig } from 'payload'
 import { isAdmin, nobody, serverOnlyField } from '@/access'
 import { LEAD_SOURCES, LIMITS, MAX_PHONE_DIGITS, MIN_PHONE_DIGITS } from '@/lib/constants'
 import { auditAfterChange, auditAfterDelete } from '@/hooks/audit'
+import { blockLeadHardDelete } from '@/hooks/hardDeleteGuard'
 import {
   derivePhoneNormalised,
   digitsOnly,
@@ -75,6 +76,10 @@ export const Leads: CollectionConfig = {
 
   hooks: {
     beforeValidate: [derivePhoneNormalised, leadDedupe],
+    // 🔴 THE ENFORCEMENT OF FR-LEAD-14. `trash: true` alone does NOT prevent a
+    // hard delete through the Local API — measured, see the hook. Without this,
+    // a lead is one `payload.delete()` away from being gone forever.
+    beforeDelete: [blockLeadHardDelete],
     afterChange: [enqueueLeadNotification, auditAfterChange],
     afterDelete: [auditAfterDelete],
   },

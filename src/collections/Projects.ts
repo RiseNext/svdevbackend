@@ -12,6 +12,7 @@ import {
   PROJECT_STATUSES,
 } from '@/lib/constants'
 import { auditAfterChange, auditAfterDelete } from '@/hooks/audit'
+import { blockProjectHardDelete } from '@/hooks/hardDeleteGuard'
 import { slugLock, stampPublishedAt } from '@/hooks/projectHooks'
 import { revalidateProject } from '@/hooks/revalidate'
 
@@ -111,6 +112,10 @@ export const Projects: CollectionConfig = {
   hooks: {
     beforeValidate: [slugLock],
     beforeChange: [stampPublishedAt],
+    // D-006: "hard-deleting a project orphans a live URL and its sitemap entry",
+    // and the frontend prerenders every project. Archive is an update that sets
+    // deletedAt; a genuine hard delete needs an explicit context flag.
+    beforeDelete: [blockProjectHardDelete],
     afterChange: [auditAfterChange, revalidateProject],
     afterDelete: [auditAfterDelete, revalidateProject],
     // ⚠️ MEASURED FROM THE TYPES: `beforeDuplicate` is a FIELD hook in Payload 3,

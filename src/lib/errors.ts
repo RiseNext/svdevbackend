@@ -217,12 +217,30 @@ function translatePayloadError(
   const code = byStatus[status]
   if (!code) return null
 
+  /**
+   * A hook that throws `APIError(humanMessage, 422, { errors: [{ field, message }] })`
+   * uses the `message` slot to carry OUR FIELD CODE — that is the only channel
+   * Payload gives us, since the errors array has no `code` of its own.
+   *
+   * ⚠️ MEASURED: Payload puts the human sentence at the TOP LEVEL
+   * (`err.message`) and the per-field entry in `err.data.errors`. So when the
+   * entry's `message` is one of our known field codes, promote it to `code` and
+   * take the human sentence from the top level — otherwise the admin UI's
+   * inline renderer would display the literal string "CONSENT_REQUIRED" to an
+   * editor instead of the sentence explaining why.
+   */
+  const knownFieldCode = (value: string | undefined): FieldCode | null =>
+    value && (FIELD_CODES as readonly string[]).includes(value) ? (value as FieldCode) : null
+
   const details = e.data?.errors
-    ?.map((fieldError) => ({
-      field: fieldError.field ?? fieldError.path ?? 'unknown',
-      code: 'INVALID' as FieldCode,
-      message: fieldError.message ?? 'Invalid value.',
-    }))
+    ?.map((fieldError) => {
+      const promoted = knownFieldCode(fieldError.message)
+      return {
+        field: fieldError.field ?? fieldError.path ?? 'unknown',
+        code: promoted ?? ('INVALID' as FieldCode),
+        message: promoted ? (e.message ?? 'Invalid value.') : (fieldError.message ?? 'Invalid value.'),
+      }
+    })
     .filter((d) => d.field !== 'unknown')
 
   return {
