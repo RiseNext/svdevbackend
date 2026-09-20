@@ -1,0 +1,70 @@
+# =============================================================================
+# LOCAL DEVELOPMENT SANDBOX — disposable by design.
+#
+# 🔴 THE RULE (MASTER-IMPLEMENTATION-PLAN.md §16.6):
+#    The local dev database is a disposable sandbox managed by Drizzle `push`.
+#    Every other environment is migrations-only.
+#    `payload migrate` is NEVER run against this database.
+#
+#    Reset it with:   npm run sandbox:reset     (docker compose down -v && up -d)
+#    NEVER with:      migrate:fresh / migrate:reset — those would drop leads.
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: sv-dev-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sv_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - sv-dev-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d sv_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # S3-compatible storage for local development — OPT-IN.
+  #
+  # The documented dev path is to leave S3_BUCKET EMPTY in .env: the s3Storage
+  # plugin is still registered (never conditionally included — a config whose
+  # SHAPE varies by environment generates divergent migrations) but stays inert,
+  # and uploads fall back to local disk at svbackend/media/.
+  #
+  # Start it only when you want to exercise the real S3 code path:
+  #   docker compose --profile s3 up -d
+  #   then set in .env:  S3_BUCKET=sv-media  S3_ENDPOINT=http://localhost:9000
+  #                      S3_FORCE_PATH_STYLE=true  S3_ACCESS_KEY_ID=minioadmin
+  #                      S3_SECRET_ACCESS_KEY=minioadmin
+  #                      CDN_BASE_URL=http://localhost:9000/sv-media
+  #
+  # NOTE: docker.io/minio/minio now requires authentication to pull. quay.io is
+  # MinIO's other official registry and pulls anonymously.
+  minio:
+    profiles: ['s3']
+    image: quay.io/minio/minio:latest
+    container_name: sv-dev-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - sv-dev-minio:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sv-dev-pgdata:
+  sv-dev-minio:

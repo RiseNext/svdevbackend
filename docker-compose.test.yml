@@ -1,0 +1,33 @@
+# =============================================================================
+# TEST DATABASE — a disposable Postgres on port 5433, migrated, never pushed.
+#
+# Running `payload migrate` against this database makes the migration chain
+# itself a tested artefact: a migration that fails on a clean database fails in
+# CI, not in production. It also removes the push/migrate mixing hazard entirely,
+# because the test DB never sees `push`.
+#
+#   docker compose -f docker-compose.test.yml up -d
+#   DATABASE_URL=postgres://postgres:test@localhost:5433/sv_test npm run migrate
+#   DATABASE_URL=postgres://postgres:test@localhost:5433/sv_test npm test
+#   docker compose -f docker-compose.test.yml down -v
+# =============================================================================
+
+services:
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: sv-test-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: sv_test
+    ports:
+      - '5433:5432'
+    # tmpfs: the test database never needs to survive a restart, and an
+    # in-memory data directory makes the suite meaningfully faster.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d sv_test']
+      interval: 3s
+      timeout: 3s
+      retries: 30

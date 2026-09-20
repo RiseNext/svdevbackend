@@ -755,3 +755,269 @@ These are **PROPOSED defaults**, not decisions. Each is the recommended answer t
 > - **P-07** (separate admin SPA) — superseded in part: the admin UI is now served by the backend app itself. OQ-5's remaining question is who builds the custom components.
 > - **D-004** (server-side sessions) — needs amending to match Payload's httpOnly cookie model. Still PROPOSED.
 > - **P-02 / P-03** (storage and email providers) — **unaffected**; OQ-7 remains open.
+
+---
+
+# MASTER IMPLEMENTATION RUN â€” 20 September 2026
+
+> Decisions taken during the master implementation run, in the order of
+> `MASTER-IMPLEMENTATION-PLAN.md` Â§29 Phase 0 (steps 1â€“22). Each is a decision an
+> implementer had to make before writing a line of code, recorded so it is never
+> re-derived. **Owner/business questions remain open and are NOT decided here** â€”
+> see D-100 and plan Â§26.5.
+
+## D-100 â€” Scope of engineering authority in this run Â· ACCEPTED
+
+The master implementation prompt authorises engineering to execute the entire plan
+autonomously, **including Phase 9 frontend integration** (plan Â§29 step 181's human
+approval gate, T-170). That authorisation is the recorded approval.
+
+It does **not** authorise inventing business decisions. Every "safe temporary
+default" adopted below is recorded as *engineering adopted the documented interim
+behaviour*, never as the owner's answer. The owner decisions listed in plan Â§26.5
+(company name OQ-6, bracketed values OQ-22, testimonials OQ-23, privacy policy
+OQ-24, CRM OQ-1, notification recipient OQ-2, providers OQ-7, brochure gating
+OQ-18, lead retention lifetime, photography, hosting vendor) remain **OPEN**.
+
+## D-101 â€” Toolchain, measured Â· ACCEPTED  *(plan step 2, T-016)*
+
+| Tool | Measured |
+|---|---|
+| Node | **v24.11.0** |
+| npm | **11.6.1** |
+| Docker | **29.3.1** (Desktop; daemon started for this run) |
+| git | **2.47.1.windows.1** |
+| `psql` | **absent from PATH** â€” all Postgres client tooling goes through `docker run postgres:15` |
+
+Node 24 confirmed acceptable: `payload@3.90.1` declares `engines.node: "^18.20.2 || >=20.9.0"`,
+verified live against the npm registry during this run. `svbackend` sets
+`engines.node: ">=20.9.0"` and **does not** copy `svfrontend`'s `<23`.
+
+## D-102 â€” Package manager: npm Â· ACCEPTED  *(plan step 3, OQ-36)*
+
+npm 11.6.1. yarn 1.22.22 is explicitly unsupported by Payload; pnpm is not installed.
+`package-lock.json` is committed. Every `pnpm payload â€¦` in the official docs
+translates to `npm run payload -- â€¦`; recorded in `svbackend/README.md`.
+
+## D-103 â€” Exact version pins Â· ACCEPTED  *(plan step 4, OQ-35, T-004)*
+
+**Verified live against the npm registry during this run**, not assumed:
+
+| Package | Pin | Registry evidence |
+|---|---|---|
+| `payload` | `3.90.1` exact | `dist-tags.latest = 3.90.1` |
+| `@payloadcms/next` | `3.90.1` exact | peer `next: ">=15.2.9 <15.3.0 \|\| >=15.3.9 <15.4.0 \|\| >=15.4.11 <15.5.0 \|\| >=16.3.3 <17.0.0"` â€” **confirms the plan's Â§3.3 claim verbatim** |
+| `@payloadcms/db-postgres` | `3.90.1` exact | peer `payload: 3.90.1` |
+| `@payloadcms/storage-s3` | `3.90.1` exact | â€” |
+| `@payloadcms/email-nodemailer` | `3.90.1` exact | â€” |
+| `next` | `16.3.3` exact | published; the lowest version inside the supported 16.x range |
+| `react` / `react-dom` | `19.2.6` exact | published |
+| `graphql` | `^16.8.1` | **a declared peer of `payload` itself** â€” installed even though `graphQL.disable: true` |
+| `sharp` | `^0.34.5` | plan Â§3.1 pins 0.34.x; 0.35.x exists but the plan's pin is honoured |
+| `zod` | `^4` | |
+| `pino` / `pino-pretty` | `^9` | |
+| `file-type` | `^21` | |
+| `vitest` | `^3` | |
+| `cross-env` | `^7` | required by the docs' own npm scripts |
+
+`svfrontend` stays on Next **15.5.25**, which is outside every supported range.
+The two apps can never share a dependency tree. **Never match the backend's Next
+version to the frontend's.**
+
+## D-104 â€” `idType: 'uuid'` Â· ACCEPTED  *(plan step 5, OQ-27)*
+
+Adapter-global and **effectively irreversible after migration 001** â€” changing it
+later is a type change across every PK and FK in ~50 child tables. ULID is not a
+supported value; only `'serial'` and `'uuid'` exist.
+
+## D-105 â€” Reserved-name renames Â· ACCEPTED  *(plan step 6, OQ-28, P6)*
+
+`Project.status` â†’ **`projectStatus`**; `Lead.status` â†’ **`leadStatus`**.
+`status` is reserved on Postgres collections with drafts enabled, and *"using
+reserved field names will result in your field being sanitized from the config"* â€”
+silently. `toPublicProject()` aliases `projectStatus` back to the public key
+`status`, so `svfrontend/src/types/content.ts` is unchanged.
+
+## D-106 â€” Unnamed `tabs` everywhere Â· ACCEPTED  *(plan step 7, OQ-30)*
+
+Named tabs group data into an object in the database; unnamed tabs are purely
+presentational. Unnamed keeps the stored shape flat and the serialiser simple.
+Changing later is a data migration, not a UI tweak.
+
+## D-107 â€” `localization` is NOT enabled Â· ACCEPTED  *(plan step 8, OQ-25)*
+
+**English only. Telugu is deferred.** Confirmed as settled project scope by the
+project owner in the master implementation instruction.
+
+**The cost of the deferral, recorded so its absence is never read as an oversight:**
+Payload's Postgres adapter puts localized fields in a **separate `_locales` table per
+collection**. Enabling `localization` after data exists is a physical schema change
+across every localized field, on top of a model that already produces ~18 tables for
+`projects` alone. It is not a config flip; it is a data migration.
+
+Admin-panel `i18n` is narrowed to `{ en }` â€” a **different, free, reversible** thing
+from content localization. No document draws that distinction; it is drawn here.
+
+## D-108 â€” Public URL layout Â· ACCEPTED  *(plan step 9, OQ-34, T-014)*
+
+- Public contract: **Next.js Route Handlers** under `src/app/(public)/api/v1/**`
+- `/healthz` and `/livez`: root Route Handlers, **outside `/api`**
+- Payload's generated REST: relocated to **`/payload-api`**
+- GraphQL: **disabled** (`graphQL: { disable: true }`)
+- `src/endpoints/` stays **empty by decision**
+
+Forced by two documented facts: Payload `config.endpoints` are *always* mounted under
+`routes.api`, and six of our public paths (`projects`, `testimonials`, `faqs`,
+`statistics`, `leads`, `media`) are collection slugs â€” leaving `routes.api` at `/api`
+would collide Payload's raw document shape with our contract.
+**Mixing the two mechanisms is the failure mode**, so one is chosen and enforced.
+
+## D-109 â€” Deployment origins Â· INTERIM (owner supplies the domain)  *(plan step 10, T-015)*
+
+Shape decided: `www.<domain>` (site) Â· `cms.<domain>` (admin + API) Â· `media.<domain>` (CDN).
+**`cms` must be a subdomain of the public site's registrable domain** or admin cookies
+become third-party and `SameSite=Lax` stops working â€” an architecture requirement, not
+a preference. The literal domain is an owner deliverable.
+
+## D-110 â€” REST-surface fork: option (A) Â· ACCEPTED  *(plan step 11, OQ-31)*
+
+`access.read` returns a published-only `Where` for anonymous callers, **plus** an
+infrastructure block on `/payload-api/<collection-slug>` at the reverse proxy.
+
+Recorded explicitly: **there is no documented REST kill switch in Payload 3.** The
+collection `endpoints: false` option's scope is unverified. Config alone cannot close
+the generated surface; the edge block is load-bearing.
+
+## D-111 â€” `notification_jobs` deleted in favour of `payload-jobs` Â· ACCEPTED  *(plan step 12, OQ-32)*
+
+Field mapping recorded one-to-one so the intent survives the table's deletion:
+
+| `notification_jobs` | `payload-jobs` |
+|---|---|
+| `status` | `completedAt` + `hasError` + `processing` |
+| `attempts` | `totalTried` |
+| `last_error` | `error` |
+| `scheduled_for` | `waitUntil` |
+| `payload` | `input` |
+
+## D-112 â€” OQ-7 closed to a *shape* only Â· INTERIM  *(plan step 13, T-008)*
+
+`@payloadcms/storage-s3` + `nodemailerAdapter` over SMTP. **The provider, region,
+account and credential ownership remain the owner's.** Both are reduced to
+environment variables; no code changes when the provider is chosen.
+
+## D-113 â€” OQ-1 / OQ-2 / OQ-3 Â· INTERIM, engineering-adopted  *(plan step 14, T-009)*
+
+- **OQ-1** â€” build the `leads` collection and persist. **No CRM integration** and none
+  designed in. A CRM is later an additive `payload-jobs` task fed by the same
+  `afterChange` hook. *Engineering adopted the interim posture; the owner has not ruled.*
+- **OQ-2** â€” a single Task `sendLeadNotification`, instant, email-only, recipient from
+  `SALES_NOTIFICATION_EMAIL`, **plus a boot guard that refuses to start in production
+  if it is unset**, so the default can never silently become "nobody is notified".
+  *The literal recipient address is an owner deliverable; it blocks production, not implementation.*
+- **OQ-3** â€” `leadStatus` is **NOT built**. `ADMIN-CMS-SPEC.md` Â§5 is explicit:
+  *"Do not default to building it."* The field is absent; adding it later is one
+  additive migration.
+
+## D-114 â€” OQ-19 phone transition Â· ACCEPTED as a time-boxed divergence  *(plan step 15, T-010)*
+
+`MIN_PHONE_DIGITS = 8` in `src/lib/constants.ts`, imported by **both** the Zod schema
+and the Payload field `validate`. This is **deliberately not P-08's "standardise on 10"**:
+a backend enforcing 10 while the live form accepts 8 creates a silent lead-loss
+regression inside the phase whose entire purpose is to stop lead loss.
+
+**Closing condition:** the tightening to 10 ships in the **same release** that changes
+`ContactForm.tsx:34` and `EnquiryPill.tsx:29`. All three move together or none moves.
+Rejected submissions are logged (without being stored as leads) so anyone 422'd can be
+re-contacted â€” the only signal that would ever reveal a mis-set threshold.
+
+## D-115 â€” SVG seeding paradox resolved by rasterisation Â· ACCEPTED  *(plan step 16, T-011)*
+
+1. The data seed **uploads nothing** â€” projects are created as drafts with
+   `versions.drafts.validate: false`, so the required `image` is not enforced.
+2. The asset seed **rasterises SVG to PNG offline**; the PNGs are **committed** to
+   `src/seed/assets/` and uploaded through the normal pipeline, hooks and all.
+3. **No SVG exception is created.** Rejected: *"allow SVG for the seeded five"*
+   (a permanent hole for a temporary problem) and *"a seed path that bypasses the
+   upload hook"* (a flag that skips magic-byte sniffing exists forever).
+
+## D-116 â€” Phase 1 gate executed in place, not as a throwaway Â· ACCEPTED (deviation, recorded)
+
+**Plan Â§29 Phase 1 specifies a throwaway spike in a temp directory, deleted at step 49.**
+This run executes every gate criterion (#1â€“#8) against the real `svbackend` foundation
+instead, under three conditions that preserve the gate's substance:
+
+1. **No migration is created until the schema facts are measured.** The dev sandbox runs
+   on Drizzle `push` (the documented dev default) until `generate:db-schema` has been read
+   and recorded. Migration 001 is written only afterwards. The irreversibility the
+   throwaway protects against is therefore still protected against.
+2. **The gate report is written before any phase beyond 4 proceeds**, with a pass/fail
+   verdict per criterion and the measured schema facts.
+3. **A gate failure is reported as a failure and stops backend expansion**, exactly as
+   Â§29 step 48 requires. Sunk cost is not a defence.
+
+Rationale: the throwaway exists so the gate is not judged by people invested in the code.
+In a single autonomous run the duplication costs a full rebuild of the foundation and buys
+no additional independence. The measured-facts-before-migration-001 property â€” the part
+that is actually irreversible â€” is preserved in full.
+
+## D-117 â€” D-004 amended: Payload's session model Â· ACCEPTED-AS-AMENDED  *(plan step 17, OQ-26)*
+
+**Mechanism struck** (*"an opaque session id with server-side session records"*);
+**intent kept** (*httpOnly, not script-readable, server-revocable*).
+
+Payload's httpOnly JWT cookie with `useSessions: true` satisfies **both** rationales.
+`admin_sessions` is **not built**. `tokenVersion` is **not built** â€” the rationale it
+was proposed to fix is met natively.
+
+Four hard rules:
+- **(a)** never set `useSessions: false` â€” *"Stateless JWTs cannot be revoked"*
+- **(b)** account deactivation is a **two-step runbook entry**: set `isActive: false`
+  **and** change that user's password as an admin (which *is* documented to end all
+  their sessions). `isActive` is our field, not Payload's, so nothing revokes on it.
+- **(c)** any script or hook that updates a user must **thread the acting user** â€”
+  *"A Local API update that runs without an authenticated user has no session to keep,
+  so it ends all of the user's sessions"* â€” or it silently logs that person out of everything.
+- **(d)** `PAYLOAD_SECRET` rotation is **break-glass only**, never the revocation mechanism.
+
+**OQ-26 is closed.** Risk R-3 downgraded.
+
+## D-118 â€” FR-AUTH-04 argon2id: ACCEPTED DOCUMENTED DEVIATION  *(plan step 18, T-006)*
+
+Payload stores a per-user salt and a **PBKDF2-SHA256** derived key, prefixed
+`pbkdf2-sha256-v1:`. The `auth` config has 13 options and **none concerns hashing**.
+Reaching argon2id requires `disableLocalStrategy: true` plus a hand-written strategy,
+which forfeits login, forgot-password, reset-password, unlock, `maxLoginAttempts`/`lockTime`,
+the admin login UI **and the session machinery D-117 depends on**.
+
+**This is recorded as a deviation, not as "satisfied".** `REQUIREMENTS.md` FR-AUTH-04,
+`SECURITY.md` Â§1 and `TRACEABILITY.md` Â§5 are amended to the vendor-accurate statement:
+*"Passwords are never stored in reversible form. The CMS stores a per-user salt and a
+PBKDF2-SHA256 derived key, and strips `salt` and `hash` from every read operation.
+Never MD5, SHA-1 or plaintext."*
+
+**Compensating controls, all of which we do own:** a 12-character minimum with a
+breach-list check, `maxLoginAttempts: 5` + `lockTime: 900000`, admin-only account
+creation, edge rate limiting on the login path, two admin accounts per environment,
+and full auth-event auditing. Per NIST SP 800-63B there is **no forced rotation and
+no composition rule**.
+
+## D-119 â€” D-012 (ISR + on-demand revalidation) promoted to ACCEPTED  *(plan step 19, T-007)*
+
+It was simultaneously PROPOSED and a hard deliverable. Now ACCEPTED.
+
+## D-120 â€” "15 core tables" amended to "15 core logical entities"  *(plan step 20, T-012)*
+
+`AI-CONTEXT.md`'s rule now reads: *15 core **logical entities**; Payload-generated
+`_rels`, `_v`, `_locales` and array-child tables are exempt and are expected to number
+40â€“60.* Left unamended, the next session counts fifty tables and concludes something
+has gone badly wrong.
+
+## D-121 â€” Project ordering deferred to the measured-schema step  *(plan step 22, OQ-29, T-003)*
+
+`orderable: true` (native fractional-index **string** keys) is the intended mechanism;
+integer `sort_order` is struck from `DATABASE-SCHEMA.md`, `VALIDATION-RULES.md` and
+`API-CONTRACT.md`. **The name of the column `orderable` creates is not documented** and
+must be measured from `generate:db-schema` before the public `sort` is written.
+Closed in D-130 once measured.
+
