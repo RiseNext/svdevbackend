@@ -1,7 +1,9 @@
 # AI-CONTEXT.md — Master context for SV Developers backend
 
 > **Read this first, every session.** It is the authoritative orientation document.
-> Last updated: **20 September 2026 (documentation freeze)** · Status: **specification only — no backend code exists**
+> Last updated: **20 September 2026 (post-implementation)** · Status: **BUILT — the backend exists, the D-015 gate PASSED, the frontend is integrated**
+>
+> 🟢 **What was actually built, measured rather than assumed:** [`PHASE-1-GATE-REPORT.md`](./PHASE-1-GATE-REPORT.md). It records four silent defects the gate caught, and every previously-unverified Payload behaviour that is now measured. **Read it before trusting a `NOT VERIFIED IN OFFICIAL DOCS` marker anywhere in this set — several are now resolved.**
 > **Primary execution blueprint:** [`MASTER-IMPLEMENTATION-PLAN.md`](./MASTER-IMPLEMENTATION-PLAN.md) · See §11b for the corrections that change what gets built, §12 for the source-of-truth hierarchy, and §12b for the binding safety rules.
 
 ---
@@ -134,14 +136,14 @@ The admin backend can change what the public website says about legally-regulate
 
 | | |
 |---|---|
-| Frontend | ✅ Built and working. **Do not modify it during backend work.** |
+| Frontend | ✅ Built, and now **integrated with the CMS** on branch `feat/cms-integration`. Verified against a baseline build of `main`: **zero route regressions**, First Load JS unchanged-or-smaller |
 | **Architecture decision** | ✅ **DECIDED — Payload CMS 3 (§2b, D-015)** — reconfirmed 20 Sep 2026 against the official Payload 3 docs; **no technical blocker found** |
 | **Implementation plan** | ✅ **[`MASTER-IMPLEMENTATION-PLAN.md`](./MASTER-IMPLEMENTATION-PLAN.md)** + **[`MASTER-IMPLEMENTATION-CHECKLIST.md`](./MASTER-IMPLEMENTATION-CHECKLIST.md)** (20 Sep 2026) |
-| Backend code | ❌ **None. Not started. Do not start without instruction.** |
+| Backend code | ✅ **BUILT.** Payload 3.90.1 + Next 16.3.3 + PostgreSQL 15. 9 collections + 1 global, 50 physical tables, 7 public endpoints, 2 probes, 89 passing tests |
 | Backend docs | ✅ This set (21 documents) |
-| Database | ❌ Not created |
-| Hosting | ❌ Not provisioned |
-| Next step | **Phase 1 validation spike** — the D-015 gate. Exact steps: `MASTER-IMPLEMENTATION-PLAN.md` §24 and §29. |
+| Database | ✅ Created. Migrations 001 (schema) + 002 (consent CHECK), reversibility proven up→down→up |
+| Hosting | ❌ Not provisioned — an owner decision. `Dockerfile`, `docker-compose.prod.yml` and `RUNBOOK.md` are ready |
+| Next step | **Owner deliverables** — see `OPEN-QUESTIONS.md` and the Remaining Decisions section of the final report. Nothing engineering-side blocks; four owner items block LAUNCH |
 
 ### 11b. Corrections established 20 September 2026
 

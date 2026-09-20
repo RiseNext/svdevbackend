@@ -1,5 +1,41 @@
 # MASTER-IMPLEMENTATION-CHECKLIST.md
 
+> ## 🟢 IMPLEMENTATION STATUS — 20 September 2026
+>
+> **The backend is BUILT and the frontend is INTEGRATED.** This checklist was
+> written before implementation; the boxes below are **NOT** retro-ticked,
+> deliberately. *"Do not check boxes that were not actually verified"* is a
+> binding rule, and mass-ticking 813 items from memory would destroy exactly the
+> signal the checklist exists to carry.
+>
+> **What was actually verified, with evidence, is recorded in:**
+>
+> | Document | Contains |
+> |---|---|
+> | [`PHASE-1-GATE-REPORT.md`](./PHASE-1-GATE-REPORT.md) | The D-015 verdict (**PASSED**), every measured schema fact, and the four SILENT defects the gate caught |
+> | [`DECISIONS.md`](./DECISIONS.md) D-100…D-121 | Every decision taken during the run, including three deviations from this plan and why |
+> | [`RUNBOOK.md`](./RUNBOOK.md) | Deploy, rollback, restore drill, break-glass |
+> | The final implementation report | Per-phase status, test counts, remaining owner decisions |
+>
+> **Summary of verified state:**
+>
+> - ✅ 9 collections + 1 global · **50 physical Postgres tables** (predicted 40–60)
+> - ✅ Migrations 001 + 002, reversibility proven **up → down → up** on a clean database
+> - ✅ **89 passing tests** (unit, config/access, domain integration)
+> - ✅ Production build passes; typecheck clean in **both** repositories
+> - ✅ Public API: 7 routes + 2 probes, contract-verified against the thin and fat records
+> - ✅ Security negatives proven: draft leak **404 not 403**, no public route returns lead
+>   data in any shape, GraphQL 404s, source spoofing rejected, honeypot indistinguishable
+> - ✅ Frontend integrated with **zero route regressions** and First Load JS unchanged-or-smaller
+> - ❌ **NOT done:** production provisioning, the restore drill, the secret-rotation
+>   rehearsal, edge rate limiting, and the four owner deliverables that block launch
+>
+> **Items below that remain genuinely unticked are the ones above marked ❌, plus
+> everything in §26 of the plan that is an owner decision.** Treat the phase
+> sections as the specification they were written as, not as a progress bar.
+
+---
+
 ## How to use this
 
 This is the **executable companion** to `MASTER-IMPLEMENTATION-PLAN.md`. The plan carries the reasoning, the config blocks and the evidence; this file carries the work.

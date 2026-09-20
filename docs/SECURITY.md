@@ -27,7 +27,7 @@ Second surface: one **public, unauthenticated write** (`POST /leads`) that store
 
 | Control | Requirement |
 |---|---|
-| Password hashing | **argon2id** (bcrypt cost ≥12 acceptable). Never MD5/SHA/plaintext/reversible |
+| Password hashing | **AMENDED (D-118).** Passwords are never stored in reversible form. The CMS stores a per-user salt and a **PBKDF2-SHA256** derived key (prefixed `pbkdf2-sha256-v1:`), and strips `salt` and `hash` from every read operation. Never MD5, SHA-1 or plaintext. Verified in the built system. ⚠️ This is an ACCEPTED DOCUMENTED DEVIATION from the original argon2id requirement, not a claim that argon2id was achieved. |
 | Password policy | Min 12 chars. Check against a breached-password list. **No forced rotation, no composition rules** — both are counterproductive (NIST SP 800-63B) |
 | Storage | Only the hash. Never log passwords, even at debug |
 | Timing | Constant-time comparison; run the hash even for unknown emails so response time doesn't reveal existence |

@@ -68,7 +68,7 @@ testimonials · faqs · statistics · site_settings   (independent)
 |---|---|---|---|
 | `id` | uuid | ✖ | PK |
 | `email` | citext | ✖ | **UNIQUE**. Login identifier |
-| `password_hash` | text | ✖ | argon2id. Never reversible |
+| ~~`password_hash`~~ | — | — | **NOT A FIELD WE DEFINE.** Payload auto-injects `hash` and `salt` on an auth-enabled collection and strips both from every read. The KDF is **PBKDF2-SHA256**, not argon2id, and is not configurable (D-118) |
 | `name` | text | ✖ | Display name, audit attribution |
 | `role` | text | ✖ | DEFAULT `'admin'`. **Single role today** — column exists so OQ-4 does not require a migration |
 | `is_active` | bool | ✖ | DEFAULT true. Disable without deleting |

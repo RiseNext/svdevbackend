@@ -88,7 +88,7 @@ Legend — **Evidence:** `SRC` frontend source · `BRIEF` business brief · `INF
 | Source | Need | Req ID | API | DB | Test | Ev |
 |---|---|---|---|---|---|---|
 | BRIEF "only authorized administrators" | Protect admin | FR-AUTH-01..03 | `/admin/auth/*` | `admin_users`, `admin_sessions` | **Every admin route unauth → 401** | BRIEF |
-| Security | Password safety | FR-AUTH-04 | — | `password_hash` | argon2id, never plaintext | SEC |
+| Security | Password safety | FR-AUTH-04 (amended D-118) | — | Payload-injected `hash` + `salt` on `users` | **PBKDF2-SHA256** per-user salt + derived key, stripped from every read. Never plaintext. NOT argon2id — see D-118 | `tests/unit` password policy; `SECURITY.md` |
 | BRIEF "Do NOT introduce public registration" | No signup | **FR-AUTH-09** | **no endpoint** | — | **No registration route exists** | BRIEF |
 | Brute force | Protect login | FR-AUTH-08 | rate limit | `failed_login_count` | Lockout triggers | SEC |
 | Admin edits legal claims | Accountability | FR-AUDIT-01..03 | `GET /admin/audit-log` | `audit_log` | Mutation writes a row | INF+SEC |
