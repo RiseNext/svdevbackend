@@ -7,7 +7,23 @@ Unresolved decisions. **Do not guess — ask.** When resolved, move the answer t
 > **CLOSED:** **OQ-6** (company name → "SV Developers", D-122) · **OQ-7a** (storage → Cloudinary, D-123).
 > **ALSO DECIDED:** production database → **Neon PostgreSQL** (D-124).
 >
-> **STILL OPEN, confirmed by the owner rather than assumed:** the **final domain** (D-125 — deliberately not chosen; all eleven places that need it are enumerated in [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §4) · **OQ-24** (privacy policy — URL not yet known, safeguard untouched) · **OQ-23** (testimonials — none invented, to be entered through Admin) · **OQ-22** (`[BRACKETED]` values) · **OQ-7b** (email provider) · and the **registered legal entity name** (see OQ-6 below).
+> **STILL OPEN, confirmed by the owner rather than assumed:** the **final domain** (D-125 — deliberately not chosen; every place that needs it is enumerated in [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §4) · **OQ-24** (privacy policy) · **OQ-23** (testimonials — none invented, to be entered through Admin) · **OQ-22** (`[BRACKETED]` values) · and the **registered legal entity name** (see OQ-6 below).
+
+> ### ✅ Production-readiness pass — 21 September 2026
+>
+> **CLOSED BY REMOVING THE FEATURE, not by answering the question:**
+> **OQ-2** (who is notified of a new lead → **nobody; the administrator reads Admin → Enquiries**) ·
+> **OQ-7b** (email provider → **there is none**).
+>
+> **RESCOPED:** **OQ-24** (privacy policy) is no longer a code gate.
+> `PRIVACY_POLICY_URL` was removed — it was rendered nowhere and served to
+> nobody, so it could be satisfied without a policy existing while its failure
+> mode was switching the enquiry form off. The obligation is real and is
+> discharged as **CMS content**: `site-settings.legalLinks` + `formNote`.
+>
+> **The ONLY remaining blockers are owner CONTENT and the domain.** Not one of
+> them blocks a line of code. [`DEPLOYMENT-CHECKLIST.md`](./DEPLOYMENT-CHECKLIST.md)
+> is the list.
 
 **Impact:** 🔴 blocks implementation · 🟠 blocks launch · 🟡 shapes design · ⚪ informational
 
@@ -20,8 +36,8 @@ Unresolved decisions. **Do not guess — ask.** When resolved, move the answer t
 | Class | Meaning | IDs |
 |---|---|---|
 | **BLOCKING MIGRATION** | Must be settled before migration 001 runs | **OQ-25** *(multilingual — safe default applied; see [`MIGRATION-001-DECISIONS.md`](./MIGRATION-001-DECISIONS.md) §5)* |
-| **BLOCKING IMPLEMENTATION** | Blocks a specific phase's work, not the whole build | **OQ-1**, **OQ-2** *(Phase 5 — leads destination + a literal recipient address)* · **OQ-18** *(brochure gating — a mutually-exclusive config fork)* · ~~OQ-7a~~ ✅ *closed 20 Sep 2026 → Cloudinary, D-123* |
-| **BLOCKING LAUNCH** | Blocks go-live. **Blocks no line of code.** | **OQ-22** *(all `[BRACKETED]` placeholders)* · **OQ-23** *(testimonials)* · **OQ-24** *(privacy policy — **the only one with legal exposure**)* · **OQ-7b** *(email sending domain + SPF/DKIM/DMARC)* · **the final domain** *(D-125)* · **the registered legal entity name** *(the unclosed half of OQ-6)* · ~~OQ-6 company name~~ ✅ *closed 20 Sep 2026 → "SV Developers", D-122* |
+| **BLOCKING IMPLEMENTATION** | Blocks a specific phase's work, not the whole build | **OQ-18** *(brochure gating — a mutually-exclusive config fork)* · ~~OQ-7a~~ ✅ *closed 20 Sep 2026 → Cloudinary, D-123* · ~~OQ-1, OQ-2~~ ✅ *closed 21 Sep 2026 — enquiries persist in our database and are read in the Admin Panel; nobody is notified* |
+| **BLOCKING LAUNCH** | Blocks go-live. **Blocks no line of code.** | **OQ-22** *(all `[BRACKETED]` placeholders)* · **OQ-23** *(testimonials)* · **OQ-24** *(privacy policy — **the only one with legal exposure**; now a CMS content task)* · **the final domain** *(D-125)* · **the registered legal entity name** *(the unclosed half of OQ-6)* · ~~OQ-6 company name~~ ✅ *closed 20 Sep 2026* · ~~OQ-7b email sending domain + SPF/DKIM/DMARC~~ ✅ *closed 21 Sep 2026 — no email* |
 | **NON-BLOCKING** | Shapes design; a safe default exists and is applied | **OQ-3** *(lead pipeline — control **not built**)* · **OQ-4** *(single role)* · **OQ-8** *(password reset)* · **OQ-9** *(slug lock)* · **OQ-11** *(hero headline stays in code)* · **OQ-12** *(`noindex` stays in code)* · **OQ-15** *(placeholder awareness)* · **OQ-19** *(phone digits — **interim ≥8**, see below)* · **OQ-20** *(autoresponder — no)* |
 | **DEFERRED** | Explicitly out of scope; recorded, not built | **OQ-5** *(who builds custom admin components — zero built through Phase 8)* · **OQ-10** *(count-coupled strings — folded into Phase 9)* · **OQ-13** *(no `Service` entity)* · **OQ-14** *(no blog/`Article`)* · **OQ-16** *(no backend image variants)* · **OQ-17** *(media retention — 30-day grace)* |
 | **RESOLVED** | Moved to `DECISIONS.md` | **OQ-21** → D-015 · **OQ-26** → D-029 |
@@ -49,14 +65,20 @@ The investigation created ten **technical** decisions (OQ-27 … OQ-36) — `idT
 ### OQ-1 — Where do leads ultimately go?
 **Question:** Persist in our PostgreSQL database, push straight to a CRM, or email only?
 **Why it matters:** determines whether the `leads` table, the admin lead screens and FR-LEAD-10..18 exist at all. The frontend PRD raised this (open question 4) and never resolved it.
-**Default if unanswered:** persist in our DB **and** notify by email. Lowest regret — data is kept and a CRM can be added later.
-**Affects:** `DATABASE-SCHEMA.md` §9, `API-CONTRACT.md`, `ADMIN-CMS-SPEC.md` §5, `BACKEND-ROADMAP.md` Phase 8.
 
-### OQ-2 — Who is notified of a new lead, and how?
-**Question:** Which address(es)? Email only, or also WhatsApp/SMS? Instant or digest?
-**Why it matters:** determines the integration set and the notification module's shape.
-**Default:** instant email to one configured sales address.
-**Affects:** `INTEGRATIONS.md` §2, FR-LEAD-05.
+✅ **RESOLVED 21 Sep 2026: persist in our PostgreSQL database, and nothing else.** No CRM, no email. The `leads` table and the admin screens exist; the notification half of the old default was removed (see OQ-2). A CRM export remains additive later — the data is all there.
+
+### ~~OQ-2 — Who is notified of a new lead, and how?~~ ✅ **CLOSED 21 Sep 2026 — NOBODY IS NOTIFIED**
+
+**Resolution:** there is **no notification of any kind**. An enquiry is delivered by being **written to the database**, and the administrator reads it in **Admin → Enquiries**. No email, no WhatsApp, no SMS, no digest.
+
+**Why that is the right answer rather than a descoping:** the notification design existed to move the enquiry from the server to a human, and it introduced a queue hop and a third-party mail provider to do it — with a failure mode where the enquiry saved, the visitor was told "we will call you back", and the business was told nothing, silently. Removing the hop removes that failure mode entirely. The administrator opening the CMS is a step a one-or-two-person business already takes.
+
+**Removed with it:** the `sendLeadNotification` task, the `enqueueLeadNotification` hook, the `leads.notifiedAt` column (migration 004), `src/email/`, `@payloadcms/email-nodemailer`, and 8 environment variables.
+
+**This also closes OQ-7b** (email provider) and removes the "email sending domain + SPF/DKIM/DMARC" launch item.
+
+⚠️ **If a notification is ever genuinely wanted, it is a NEW decision** with its own justification — not this one being reopened by default. `tests/integration/accessControl.test.ts` fails if a nodemailer adapter reappears, so it cannot come back by accident.
 
 ### OQ-3 — Is the lead status pipeline real?
 **Question:** Will anyone actually move leads through `new → contacted → visit_scheduled → visited → won → lost`?
@@ -79,11 +101,13 @@ The investigation created ten **technical** decisions (OQ-27 … OQ-36) — `idT
 **What it cost:** Payload publishes no Cloudinary adapter and Cloudinary has no S3-compatible endpoint, so `@payloadcms/storage-s3` was removed and a ~100-line adapter written against the documented `@payloadcms/plugin-cloud-storage` interface. **No migration** — the injected fields are identical.
 **Still outstanding:** the Cloudinary account itself (AWAITING INFRA), and the `Content-Disposition: attachment` deviation recorded in D-123.
 
-#### OQ-7b — Email provider · **NOT blocking implementation · BLOCKING LAUNCH**
-**Question:** Which account, which sending domain, and who configures SPF/DKIM/DMARC?
-**Why it matters:** `@payloadcms/email-nodemailer` speaks **any** SMTP transport, so the provider is an **env-var decision, not an architectural one** — it never blocked Phase 5. But **deliverability is entirely outside Payload**, and a notification in a spam folder is indistinguishable from a lost lead.
-**Default for development:** `nodemailerAdapter()` with **no arguments** uses ethereal.email and prints credentials to the console — which also satisfies *"staging must not send real notifications"* at zero cost.
-**Affects:** `INTEGRATIONS.md` §2/§3, plan §14.
+#### ~~OQ-7b — Email provider~~ ✅ **CLOSED 21 Sep 2026 — BY REMOVING THE QUESTION**
+
+**Resolution: there is no email provider, because there is no email.** See OQ-2 above. No account, no sending domain, no SPF/DKIM/DMARC, no deliverability surface.
+
+⚠️ **One thing this removal fixed that nobody had noticed.** The development default was `nodemailerAdapter()` with no arguments, which **provisions an ethereal.email test account over the network at boot** — on every `payload migrate`, every worker start and every test run. Booting depended on a third-party service unrelated to this product. Payload's own `consoleEmailAdapter` fallback, which is what you get by omitting the `email` key, does not.
+
+**Consequence, recorded rather than discovered later:** the Admin Panel's "Forgot password?" link cannot deliver. Replaced by `npm run admin:reset-password` and by one administrator resetting another's password in Admin → Users — [`RUNBOOK.md`](./RUNBOOK.md) §7.
 
 ### ~~OQ-21 — Build this CMS, or adopt a headless CMS?~~ ✅ **RESOLVED — 18 Sep 2026**
 **Resolution: adopt a headless CMS — Payload CMS 3, self-hosted, on PostgreSQL**, with hand-written custom endpoints for the public API.
@@ -109,13 +133,28 @@ Phone, email, WhatsApp, address, domain, approval numbers, RERA registration, st
 The three current quotes are **invented placeholders with bracketed names**. The repo is explicit: publishing invented reviews under real-sounding names is a fabricated record.
 **Default:** ship with the section empty rather than with placeholders.
 
-### OQ-24 — Privacy policy · **STILL OPEN · BLOCKS LAUNCH**
+### OQ-24 — Privacy policy · **STILL OPEN · a CONTENT task, no longer a code gate**
 `[PRIVACY_URL]` is inert, yet the contact form collects name + phone and promises *"We will only use your number to talk to you about this project."*
-**Why it matters:** **collecting PII without a reachable privacy policy is the largest compliance gap in the project** (DPDP Act). Must exist before the form goes live.
+**Why it matters:** the site collects personal data, so a reachable privacy policy is a genuine obligation (DPDP Act).
 
-**Status at 20 Sep 2026:** confirmed open. The owner has stated the final URL is **not yet known**, so no URL has been invented and no placeholder that could pass for a real one exists anywhere. `PRIVACY_POLICY_URL` stays configurable and **the production safeguard is untouched**: `POST /api/v1/leads` refuses submissions in production while it is unset (`leadCaptureAllowed` in `src/lib/env.ts`).
+**Status at 21 Sep 2026 — RESCOPED, and the rescope is evidence-based.**
 
-⚠️ **The sub-processor list the policy must name GREW today.** It now includes **Cloudinary** (media) and **Neon** (the database where lead name and phone are stored), alongside the still-unchosen email provider (OQ-7b). Three separate places must then be set — the env var, the Site Settings legal link, and the `formNote` consent sentence. Enumerated in [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §5.
+🔴 **`PRIVACY_POLICY_URL` HAS BEEN REMOVED.** The entry below used to describe it as "the production safeguard, untouched". It was investigated and it was not a safeguard:
+
+- it was read in **exactly one place** — a boolean that made `POST /api/v1/leads` return 503 in production;
+- it was **never rendered, never served to the frontend, and never linked from anything a visitor could see**;
+- therefore **setting it to any syntactically valid URL satisfied the gate without a policy existing**, and leaving it unset switched off the only feature the website is for.
+
+A guard that can be satisfied without doing the thing, and whose failure mode is disabling the product, is not a guard. **The obligation is real; the mechanism was theatre.**
+
+**Where the obligation is actually discharged — two places, both CMS content, neither needing a deploy:**
+
+1. **Site Settings → Legal → `legalLinks`** — the footer link the frontend `Footer` renders on every page. Currently `[PRIVACY_URL]`, rendered inert by the placeholder guard, so no dead link ships meanwhile.
+2. **Site Settings → Content → `formNote`** — the consent sentence beside the submit button, still reading `[LINK TO PRIVACY POLICY]`.
+
+⚠️ **The sub-processor list SHRANK on 21 Sep 2026 and is now exactly two:** **Neon** (the database, which holds the enquiries) and **Cloudinary** (media, which holds no enquiry data). *The email provider left the list because there is no email provider* — OQ-7b is closed by removal.
+
+🔴 **The policy must not claim the site collects an email address.** The contact form does not ask for one and the database does not store one. The complete collected-field list is in [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §5; the launch steps are in [`DEPLOYMENT-CHECKLIST.md`](./DEPLOYMENT-CHECKLIST.md) §5.
 
 ---
 

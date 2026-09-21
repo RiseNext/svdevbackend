@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { isEmptyForPublicOutput, put } from '@/serializers/put'
 import { toImageRef, UnpopulatedUploadError } from '@/serializers/toImageRef'
 import { toPublicProject, toPublicProjectCard } from '@/serializers/toPublicProject'
+import { toPublicSiteSettings } from '@/serializers/toPublicContent'
 import { coerceIcon, ICON_NAMES, isIconName } from '@/lib/icons'
 import { isPlaceholder } from '@/lib/constants'
-import { escapeHtml } from '@/email/escapeHtml'
 import { slugify, SLUG_PATTERN } from '@/fields/slugField'
 import { digitsOnly, isJunkPhone, stripHtml, toE164 } from '@/hooks/leadHooks'
 import { isBreachedPassword } from '@/lib/passwordPolicy'
@@ -249,18 +249,20 @@ describe('toPublicProject() — the contract', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-describe('escapeHtml — Payload provides ZERO escaping', () => {
-  it('escapes the five dangerous characters, ampersand FIRST', () => {
-    expect(escapeHtml('<script>alert(1)</script>')).toBe(
-      '&lt;script&gt;alert(1)&lt;/script&gt;',
-    )
-    expect(escapeHtml('a & b')).toBe('a &amp; b')
-    // Order matters: escaping & last would double-escape the others.
-    expect(escapeHtml('<&>')).toBe('&lt;&amp;&gt;')
-    expect(escapeHtml(`"'`)).toBe('&quot;&#39;')
-  })
-})
+/**
+ * ---------------------------------------------------------------------------
+ * `escapeHtml` WAS TESTED HERE AND IS GONE.
+ *
+ * It existed to make the notification EMAIL TEMPLATES safe — Payload provides
+ * zero escaping and the email renderer, unlike React, did not escape on output.
+ * With no email subsystem there is no unescaped output sink left in the system,
+ * so the function and its test went together. Keeping a test for a deleted
+ * escaper would have been a test that passes and protects nothing.
+ *
+ * The boundary sanitiser it backed up — `stripHtml`, which cleans the enquiry
+ * message on the way IN — is still here and is covered below.
+ * ---------------------------------------------------------------------------
+ */
 
 // ---------------------------------------------------------------------------
 describe('slugify', () => {
@@ -325,5 +327,75 @@ describe('placeholder detection', () => {
     expect(isPlaceholder('© [YEAR] SV Developers. All rights reserved.')).toBe(false)
     // And the one UNBRACKETED placeholder in the whole repository.
     expect(isPlaceholder('https://www.example.com')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+/**
+ * REGRESSION. A freshly migrated production database has NO site-settings row
+ * until the owner first saves the global, so every field on it reads back
+ * `undefined`. `required: true` does not help — it constrains writes, not reads
+ * of a document that was never written.
+ *
+ * `undefined` in a FIELD is dropped by JSON.stringify and the frontend's
+ * optional handling covers it. `undefined` interpolated INTO A STRING survives
+ * serialisation as the literal seven characters and reaches the visitor. That
+ * is the whole difference, and it is why only `copyrightText` needed a guard.
+ */
+describe('toPublicSiteSettings — copyrightText on an unsaved global', () => {
+  const year = new Date().getFullYear()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const serialise = (doc: any) => toPublicSiteSettings(doc)
+
+  it('never emits the literal string "undefined" when the global is empty', () => {
+    const out = serialise({})
+    expect(out.copyrightText).not.toContain('undefined')
+    expect(out.copyrightText).toBe(`© ${year}. All rights reserved.`)
+  })
+
+  it('prefers the registered legal name', () => {
+    const out = serialise({ legalName: 'SV Developers Private Limited', name: 'SV Developers' })
+    expect(out.copyrightText).toBe(`© ${year} SV Developers Private Limited. All rights reserved.`)
+  })
+
+  it('falls back to the trading name when no legal entity name is set', () => {
+    const out = serialise({ name: 'SV Developers' })
+    expect(out.copyrightText).toBe(`© ${year} SV Developers. All rights reserved.`)
+  })
+
+  it('drops the owner segment rather than inventing one — an omitted proprietor is honest, a fabricated one is a false legal claim', () => {
+    const out = serialise({ legalName: '   ', name: '' })
+    expect(out.copyrightText).toBe(`© ${year}. All rights reserved.`)
+  })
+
+  /**
+   * REGRESSION. `PublicSiteSettings` declares these six as `string`, so the
+   * frontend's types promise they are always present and its code calls
+   * `.startsWith()` on them unguarded. Assigning `undefined` makes
+   * JSON.stringify DROP THE KEY, and the frontend then receives an object
+   * missing fields its own types swear exist — a lie TypeScript cannot catch,
+   * because it is on the wire rather than in the source.
+   *
+   * It crashed `next build` outright on /projects, which is how it was found.
+   */
+  it('emits every contract-required scalar even when the global was never saved', () => {
+    const out = serialise({})
+    for (const key of ['name', 'legalName', 'url', 'email', 'phone', 'whatsapp'] as const) {
+      expect(out, `${key} must be present`).toHaveProperty(key)
+      expect(typeof out[key], `${key} must be a string`).toBe('string')
+    }
+    expect(out.address).toEqual([])
+    // Survives the round trip the frontend actually performs.
+    const onWire = JSON.parse(JSON.stringify(out))
+    for (const key of ['name', 'legalName', 'url', 'email', 'phone', 'whatsapp'] as const) {
+      expect(onWire, `${key} must survive JSON.stringify`).toHaveProperty(key)
+    }
+  })
+
+  it('does not fabricate contact details to fill the required fields', () => {
+    const out = serialise({})
+    expect(out.phone).toBe('')
+    expect(out.email).toBe('')
+    expect(out.whatsapp).toBe('')
   })
 })

@@ -125,7 +125,6 @@ export interface Config {
   user: User;
   jobs: {
     tasks: {
-      sendLeadNotification: TaskSendLeadNotification;
       revalidatePaths: TaskRevalidatePaths;
       purgeLeadPii: TaskPurgeLeadPii;
       sweepDeletedMedia: TaskSweepDeletedMedia;
@@ -718,10 +717,6 @@ export interface Lead {
    */
   sourcePath?: string | null;
   /**
-   * When the sales notification was sent.
-   */
-  notifiedAt?: string | null;
-  /**
    * Implicit consent by submission: the privacy note is rendered next to the submit button. There is no separate consent checkbox on the form today.
    */
   consentGiven: boolean;
@@ -915,13 +910,7 @@ export interface PayloadJob {
     | {
         executedAt: string;
         completedAt: string;
-        taskSlug:
-          | 'inline'
-          | 'sendLeadNotification'
-          | 'revalidatePaths'
-          | 'purgeLeadPii'
-          | 'sweepDeletedMedia'
-          | 'watchdogFailedJobs';
+        taskSlug: 'inline' | 'revalidatePaths' | 'purgeLeadPii' | 'sweepDeletedMedia' | 'watchdogFailedJobs';
         taskID: string;
         input?:
           | {
@@ -954,16 +943,7 @@ export interface PayloadJob {
         id?: string | null;
       }[]
     | null;
-  taskSlug?:
-    | (
-        | 'inline'
-        | 'sendLeadNotification'
-        | 'revalidatePaths'
-        | 'purgeLeadPii'
-        | 'sweepDeletedMedia'
-        | 'watchdogFailedJobs'
-      )
-    | null;
+  taskSlug?: ('inline' | 'revalidatePaths' | 'purgeLeadPii' | 'sweepDeletedMedia' | 'watchdogFailedJobs') | null;
   queue?: string | null;
   waitUntil?: string | null;
   processing?: boolean | null;
@@ -1257,7 +1237,6 @@ export interface LeadsSelect<T extends boolean = true> {
   message?: T;
   source?: T;
   sourcePath?: T;
-  notifiedAt?: T;
   consentGiven?: T;
   isRead?: T;
   ipAddress?: T;
@@ -1663,18 +1642,6 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "TaskSendLeadNotification".
- */
-export interface TaskSendLeadNotification {
-  input: {
-    leadId: string;
-  };
-  output: {
-    emailSent: boolean;
-  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

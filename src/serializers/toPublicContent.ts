@@ -38,12 +38,39 @@ export type PublicSiteSettings = {
 export const toPublicSiteSettings = (doc: SiteSetting): PublicSiteSettings => {
   const out: Record<string, unknown> = {}
 
-  out.name = doc.name
-  out.legalName = doc.legalName
-  out.url = doc.url
-  out.email = doc.email
-  out.phone = doc.phone
-  out.whatsapp = doc.whatsapp
+  /**
+   * 🔴 THE SIX REQUIRED SCALARS ARE COERCED, AND THIS IS A CONTRACT OBLIGATION
+   * RATHER THAN DEFENSIVE PADDING.
+   *
+   * `PublicSiteSettings` declares all six as `string` — NOT `string | undefined`
+   * — so the frontend's types promise they are always there, and its code is
+   * entitled to call `.startsWith()` on them without a guard.
+   *
+   * A bare `out.name = doc.name` breaks that promise the moment the global has
+   * never been saved: the value is `undefined`, `JSON.stringify` DROPS THE KEY
+   * ENTIRELY, and the frontend receives an object missing fields its own types
+   * swear are present. TypeScript cannot catch it — the lie is on the wire, not
+   * in the source.
+   *
+   * ⚠️ THIS WAS NOT THEORETICAL. It crashed `next build` outright:
+   *   TypeError: Cannot read properties of undefined (reading 'startsWith')
+   *   Export encountered an error on /projects/page
+   * A freshly migrated production database is exactly this state, so deploying
+   * the frontend before the owner first saved Admin → Site Settings failed the
+   * Vercel build rather than degrading.
+   *
+   * `''` is the honest empty value: it satisfies the declared type, it is
+   * falsy so every `value ? … : …` branch treats it as absent, and it invents
+   * no phone number, address or company name. `put()` is deliberately NOT used
+   * here — it OMITS empty values, which is correct for the optional fields
+   * below and is precisely the wrong behaviour for a required one.
+   */
+  out.name = doc.name ?? ''
+  out.legalName = doc.legalName ?? ''
+  out.url = doc.url ?? ''
+  out.email = doc.email ?? ''
+  out.phone = doc.phone ?? ''
+  out.whatsapp = doc.whatsapp ?? ''
   out.address = doc.address ?? []
 
   /**
@@ -58,8 +85,35 @@ export const toPublicSiteSettings = (doc: SiteSetting): PublicSiteSettings => {
    *
    * Computing it means the placeholder cannot exist. `copyright_text` is
    * deliberately NOT a field on the global, so nobody can re-add it.
+   *
+   * 🔴 THE OWNER NAME IS RESOLVED, NOT INTERPOLATED BLIND, AND THAT GUARD IS
+   * LOAD-BEARING RATHER THAN DEFENSIVE.
+   *
+   * `legalName` is `required: true` on the global — but "required" is a WRITE
+   * constraint, and it says nothing about a global that has NEVER BEEN SAVED.
+   * A global with no row reads back as an empty document, so `doc.legalName` is
+   * `undefined`, and a bare `${doc.legalName}` renders the literal seven
+   * characters "undefined" INTO A STRING. `undefined` in a field is dropped by
+   * `JSON.stringify` and the frontend's optional handling covers it; `undefined`
+   * baked into the middle of a string survives serialisation intact and reaches
+   * the visitor.
+   *
+   * ⚠️ THIS IS NOT A HYPOTHETICAL — IT IS THE STATE OF A FRESHLY MIGRATED
+   * PRODUCTION DATABASE. Between `payload migrate` and the moment the owner
+   * first saves Admin → Site Settings, every page footer rendered
+   * "© 2026 undefined. All rights reserved."
+   *
+   * `name` (the trading name) is the fallback because it is the same entity by a
+   * different label, and it is the field the owner fills in first. If BOTH are
+   * absent the name segment is DROPPED ENTIRELY rather than substituted: a
+   * copyright line with no proprietor is incomplete, but a copyright line
+   * asserting a company name this code invented would be a fabricated legal
+   * claim. Omission is the honest failure mode.
    */
-  out.copyrightText = `© ${new Date().getFullYear()} ${doc.legalName}. All rights reserved.`
+  const copyrightOwner = (doc.legalName ?? doc.name ?? '').trim()
+  out.copyrightText = copyrightOwner
+    ? `© ${new Date().getFullYear()} ${copyrightOwner}. All rights reserved.`
+    : `© ${new Date().getFullYear()}. All rights reserved.`
 
   put(out, 'tagline', doc.tagline)
   put(out, 'description', doc.description)

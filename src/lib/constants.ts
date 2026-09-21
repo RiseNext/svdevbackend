@@ -18,13 +18,13 @@
  * 🔴 THIS IS A FALLBACK, NOT THE COMPANY NAME.
  *
  * The company name is CMS data: `site-settings.name`, edited in the Admin
- * Panel, resolved by the owner on 20 Sep 2026 (OQ-6) to "SV Developers". This
- * constant exists for the ONE place that cannot read the database — the email
- * templates, when the `site-settings` lookup itself fails — so that a cosmetic
- * footer can never fail a lead notification.
+ * Panel, resolved by the owner on 20 Sep 2026 (OQ-6) to "SV Developers".
  *
- * Anything that CAN read the CMS must read the CMS. Adding a second consumer of
- * this constant is almost certainly a mistake: check `site-settings` first.
+ * ⚠️ ITS ONLY CONSUMER — the email templates — WAS DELETED WITH THE EMAIL
+ * SUBSYSTEM. It is kept as the seed's default so a fresh database has a sane
+ * `site-settings.name` before anyone opens the Admin Panel. Anything that CAN
+ * read the CMS must read the CMS; a second consumer here is almost certainly a
+ * mistake.
  */
 export const DEFAULT_SITE_NAME = 'SV Developers'
 
@@ -82,6 +82,29 @@ export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000
 /** The honeypot field name. Named here so the "reject unknown properties" rule
  *  and the honeypot rule cannot contradict each other (CONF-48). */
 export const HONEYPOT_FIELD = 'website'
+
+/**
+ * RATE LIMITS FOR `POST /api/v1/leads` — enforced IN THE APPLICATION, because
+ * the real deployment (Railway) has no reverse proxy to enforce them at.
+ *
+ * TWO LAYERS, because they stop different things:
+ *   · PER IP     — a script hammering the endpoint from one host.
+ *   · PER PHONE  — the same number submitted from many IPs, which the IP limit
+ *                  cannot see and which a residential proxy pool makes cheap.
+ *
+ * The per-IP ceiling is the RUNBOOK's own published figure (5/min/IP) so the
+ * documented contract and the code agree. The per-phone window matches the
+ * "3/hour/phone" the runbook already said could only be enforced in the
+ * application, because the edge cannot read a request body.
+ *
+ * 🔶 CALIBRATED TO BE GENEROUS ON PURPOSE. A false 429 on a plot enquiry costs a
+ * real sale; a bot getting five submissions in instead of three costs a row an
+ * administrator deletes. When in doubt these go UP, not down.
+ */
+export const LEAD_RATE_LIMIT_PER_IP = 5
+export const LEAD_RATE_LIMIT_IP_WINDOW_MS = 60 * 1000
+export const LEAD_RATE_LIMIT_PER_PHONE = 3
+export const LEAD_RATE_LIMIT_PHONE_WINDOW_MS = 60 * 60 * 1000
 
 // ---------------------------------------------------------------------------
 // Retention

@@ -70,7 +70,7 @@
 | Data layer | **`@payloadcms/db-postgres`** (Drizzle-based) | D-015. Migrations are `payload migrate:*` |
 | Database | **PostgreSQL 15+** — **Neon** in production | D-124 (20 Sep 2026). App uses the POOLED endpoint, the migrate job the DIRECT one. `PRODUCTION-CONFIG.md` §2 |
 | Storage | **Cloudinary** via a hand-written adapter on `@payloadcms/plugin-cloud-storage` | D-123 (20 Sep 2026), closing OQ-7a and superseding D-112's S3 shape. **`@payloadcms/storage-s3` is removed** — Payload publishes no Cloudinary adapter and Cloudinary has no S3-compatible endpoint. `PRODUCTION-CONFIG.md` §3 |
-| Email | **`@payloadcms/email-nodemailer`** | Speaks any SMTP transport, so the provider is an env-var choice (OQ-7b), not an architectural one |
+| Email | **NONE** — no adapter, no dependency | ⚠️ **Changed 21 Sep 2026, and it is an architecture decision rather than a deferral.** An enquiry is delivered by being **written to Postgres** and read in Admin → Enquiries; the database is the inbox. `@payloadcms/email-nodemailer` was removed, which also removed a boot-time network call to `ethereal.email` that ran on every migrate, worker start and test run. Payload falls back to its own `consoleEmailAdapter`, so nothing throws. **Consequence:** the Admin Panel's "Forgot password?" link cannot deliver — recovery is `npm run admin:reset-password` (RUNBOOK §7). Closes OQ-7b by removing the question |
 | Sessions | **Payload auth, `useSessions: true`** (httpOnly cookie, stateful, revocable) | See §6 and D-029 |
 | Admin UI | **Payload's native admin**, generated from config | D-015 — not a separate app |
 | Public API | **Hand-written Next.js Route Handlers** + `toPublicProject()` | D-023, D-033 |
@@ -83,7 +83,8 @@
 
 **Superseded by D-015.** The layering below was written for a hand-built Fastify service. Payload does not have routes/services/repositories, and imposing that shape on it fights the framework.
 
-**The actual file map is [`MASTER-IMPLEMENTATION-PLAN.md`](./MASTER-IMPLEMENTATION-PLAN.md) §21.** In outline: `src/collections/` and `src/globals/` (config-as-code) · `src/access/` · `src/hooks/` · `src/app/(payload)/` (admin + Payload's own API) · `src/app/(public)/api/v1/` (our hand-written public Route Handlers) · `src/serializers/` · `src/schemas/` (Zod) · `src/jobs/` · `src/email/` · `src/migrations/` · `src/seed/`.
+**The actual file map is [`MASTER-IMPLEMENTATION-PLAN.md`](./MASTER-IMPLEMENTATION-PLAN.md) §21.** In outline: `src/collections/` and `src/globals/` (config-as-code) · `src/access/` · `src/hooks/` · `src/app/(payload)/` (admin + Payload's own API) · `src/app/(public)/api/v1/` (our hand-written public Route Handlers) · `src/serializers/` · `src/schemas/` (Zod) · `src/jobs/` · `src/migrations/` · `src/seed/`.
+*(`src/email/` was deleted on 21 Sep 2026 with the email subsystem.)*
 
 **The rule that survives, restated for Payload:** *a public Route Handler never returns a Payload document directly.* It calls the Local API and passes the result through an allow-list serialiser, built key by key, never spread. That is the same separation the old rule protected — authorization and response shaping in one place — expressed in the framework we actually use.
 
@@ -147,6 +148,18 @@ Rationale: the admin UI is a browser app on a known origin. Sessions are revocab
 **If** a JWT is chosen instead: short-lived access token + rotating refresh token, refresh stored server-side so revocation still works. Record the choice in `DECISIONS.md`.
 
 ## 7. Environment configuration
+
+> 🔴 **SUPERSEDED — DO NOT USE THE LIST BELOW.** It was written for the
+> hand-built Fastify service that D-015 overturned, and not one of
+> `SESSION_SECRET`, `ADMIN_ORIGIN`, `PUBLIC_SITE_ORIGIN`, `STORAGE_*`,
+> `EMAIL_API_KEY`, `EMAIL_FROM` or `RATE_LIMIT_*` exists in this codebase.
+>
+> **The authoritative list is `src/schemas/env.ts`** — 18 keys, CI-checked
+> against `.env.example` by `npm run check:drift`. The classified audit
+> (required / optional / dev-only / removed) is
+> [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §5b.
+>
+> Retained below only so the superseded design stays auditable.
 
 ```
 DATABASE_URL

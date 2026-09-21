@@ -1,13 +1,25 @@
 # =============================================================================
-# PRODUCTION SHAPE — three containers from ONE image.
+# PRODUCTION SHAPE — three long-running containers plus a migrate job, from ONE
+# image. This file is the reference shape; Railway runs the same four commands
+# as four services (see docs/DEPLOYMENT-CHECKLIST.md §3).
 #
-# 🔴 THE DEFINING OPERATIONAL RISK OF THIS DEPLOYMENT IS SILENT WORKER DEATH.
-# If a worker dies: `jobs.queue()` still succeeds, leads still save, the API
-# still returns 201, and ZERO notifications go out with no error anywhere in the
-# request path. It is indistinguishable from "business is quiet".
-# Worker liveness is therefore a FIRST-CLASS ALERT, not a nice-to-have.
+# 🔴 WHAT A DEAD WORKER COSTS — AND IT IS NO LONGER ENQUIRIES.
+# This header used to read "if a worker dies, leads still save, the API still
+# returns 201, and ZERO notifications go out". That risk was removed at the
+# source rather than monitored: there are no notifications. An enquiry is
+# written to Postgres synchronously and read in Admin -> Enquiries, so NO
+# ENQUIRY EVER PASSES THROUGH A WORKER and no worker failure can lose one.
+#
+# What a dead worker now costs, in full:
+#   · worker-default      — a failed revalidation is never retried, so a publish
+#                           shows up on the website at its next ISR window
+#                           instead of immediately. Late, not lost.
+#   · worker-maintenance  — the 90-day PII purge and the 30-day media sweep stop.
+#                           Nothing breaks the same day; it accrues.
+# Both still deserve a liveness alert. Neither is a data-loss event any more.
 #
 # Secrets come from the platform secret store, never from this file.
+# NOTE: there are no mail credentials to store — this product sends no email.
 # =============================================================================
 
 services:
@@ -20,8 +32,13 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    # READINESS — /healthz, NOT /livez. A /livez probe answers 200 even when the
+    # environment is invalid and every real route is returning 500, because
+    # /livez deliberately imports none of the Payload config. That was measured
+    # on this image, not assumed. See the HEALTHCHECK block in the Dockerfile
+    # for the full finding; /livez remains the correct LIVENESS probe.
     healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3001/livez']
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3001/healthz']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -65,19 +82,22 @@ services:
   # their own. Duplicate `sendLeadNotification` jobs mean the sales team gets
   # the same lead three times.
   #
-  # WHO DRAINS WHAT (all five tasks are accounted for — RUNBOOK.md §4b):
-  #   worker-default      queue `default`     sendLeadNotification, revalidatePaths
-  #                                           — queued by hooks, event-driven
+  # WHO DRAINS WHAT (all FOUR tasks are accounted for — RUNBOOK.md §4b):
+  #   worker-default      queue `default`     revalidatePaths
+  #                                           — queued by a hook only when a
+  #                                             direct revalidation call failed
   #   worker-maintenance  queue `maintenance` purgeLeadPii (daily 21:45 UTC),
   #                                           sweepDeletedMedia (daily 22:15 UTC),
   #                                           watchdogFailedJobs (every 15 min)
   #                                           — queued by `schedule`, which ONLY
   #                                           `--handle-schedules` turns into jobs
   #
-  # 🔴 worker-maintenance IS NOT OPTIONAL as of migration 003. Without it the
-  # PII purge, the media sweep and the DEAD-LETTER WATCHDOG never run, and the
-  # watchdog is the only thing that notices a lead notification that exhausted
-  # its retries during an SMTP outage.
+  # ⚠️ IT WAS FIVE TASKS. `sendLeadNotification` was removed with the email
+  # subsystem: nothing is sent, so nothing is queued for an enquiry.
+  #
+  # 🔴 worker-maintenance is REQUIRED as of migration 003 — it is the only
+  # process that runs `--handle-schedules`, so without it the 90-day PII purge
+  # and the 30-day media sweep never run at all.
   #
   # ⚠️ BOTH MUST BE RESTARTED AFTER EVERY DEPLOY, or they keep running the old
   # code against the new schema.
@@ -87,7 +107,8 @@ services:
     restart: unless-stopped
     env_file: [.env.production]
     # ENABLE_JOB_WORKERS stays FALSE here: autoRun is the FALLBACK for when a
-    # second container is refused on cost, and running both would duplicate jobs.
+    # second container is refused on cost, and running both would run every job
+    # twice.
     environment:
       ENABLE_JOB_WORKERS: 'false'
     command: ['npx', 'payload', 'jobs:run', '--cron', '* * * * *', '--queue', 'default', '--limit', '25']

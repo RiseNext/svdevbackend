@@ -1,8 +1,7 @@
-import { APIError, type CollectionAfterChangeHook, type CollectionBeforeValidateHook, type FieldHook } from 'payload'
+import { APIError, type CollectionBeforeValidateHook, type FieldHook } from 'payload'
 
 import {
   DEFAULT_COUNTRY_CALLING_CODE,
-  DEFAULT_QUEUE,
   LEAD_DEDUPE_WINDOW_MS,
   MAX_PHONE_DIGITS,
   MIN_PHONE_DIGITS,
@@ -26,13 +25,13 @@ export const normaliseText: FieldHook = ({ value }) => {
 }
 
 /**
- * Strip HTML from the lead message.
+ * Strip HTML from the enquiry message.
  *
- * STORED-XSS DEFENCE. The message is later rendered in the admin AND in a
- * notification email. React escapes by default; the EMAIL RENDERER DOES NOT,
- * which is why `escapeHtml` exists — but removing the markup at the boundary
- * means neither layer is the only thing standing between an attacker and the
- * sales team's inbox.
+ * STORED-XSS DEFENCE AT THE BOUNDARY. The Admin Panel is React and escapes by
+ * default, so this is defence in depth rather than the only layer — but the
+ * message is attacker-controlled free text written by an anonymous visitor, and
+ * sanitising on the way IN means a future consumer of this column (a CSV export,
+ * a report) inherits the guarantee instead of having to re-derive it.
  */
 export const stripHtml: FieldHook = ({ value }) => {
   if (typeof value !== 'string') return value
@@ -135,46 +134,20 @@ export const leadDedupe: CollectionBeforeValidateHook = async ({ data, req, oper
 }
 
 /**
- * ENQUEUE THE NOTIFICATION — never send inline.
+ * 🔴 THERE IS NO `enqueueLeadNotification` HOOK, AND THAT IS THE POINT.
  *
- * The official jobs documentation answers this by name: "If the email service is
- * temporarily down, the hook would fail and potentially block the user creation.
- * Jobs can retry automatically." FR-LEAD-06 requires the same from the other
- * direction: a failed notification must not fail the request.
+ * It used to queue a `sendLeadNotification` job in `afterChange`. Both the hook
+ * and the task are gone: this product sends no email, so an enquiry has nothing
+ * to be forwarded to. The row in `leads` IS the delivery, and it is committed
+ * before the endpoint returns 201.
  *
- * 🔴 The try/catch is what keeps FR-LEAD-06 true. A queue failure must not fail
- * the visitor's request either.
+ * What that removal actually bought, beyond deleting code: the previous design
+ * had a failure mode where the enquiry saved, the visitor saw "we will call you
+ * back", and the business was told nothing — because a worker was dead or a mail
+ * provider was down, neither of which surfaces in the request path. That whole
+ * class of failure no longer has anywhere to occur.
  *
- * Note the ordering guarantee this leans on: `afterChange` runs AFTER the lead
- * row is written, so "persist first, enqueue second" is STRUCTURALLY guaranteed
- * rather than remembered.
- *
- * The enqueue IS awaited and DOES carry `req`, so it shares the transaction —
- * that is deliberate and is the opposite of the revalidation hook's choice.
+ * ⚠️ `context.skipNotification` is still accepted by scripts and seeds that set
+ * it; it is now simply inert. Leaving it tolerated costs nothing and keeps those
+ * call sites from breaking.
  */
-export const enqueueLeadNotification: CollectionAfterChangeHook = async ({
-  req,
-  doc,
-  operation,
-  context,
-}) => {
-  if (operation !== 'create') return doc
-  if (context?.skipNotification) return doc
-
-  try {
-    await req.payload.jobs.queue({
-      task: 'sendLeadNotification',
-      // An ID, never the object — the docs' own rule. The handler re-reads the
-      // lead, so a retry always works from current data.
-      input: { leadId: String(doc.id) },
-      queue: DEFAULT_QUEUE,
-      req,
-    })
-  } catch (err) {
-    req.payload.logger.error(
-      { err, leadId: doc.id },
-      'FAILED TO ENQUEUE LEAD NOTIFICATION — the lead IS saved and visible in the admin, but nobody has been told about it',
-    )
-  }
-  return doc
-}

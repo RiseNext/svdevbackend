@@ -8,7 +8,6 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { nodemailerAdapter } from '@payloadcms/email-nodemailer'
 import { en } from '@payloadcms/translations/languages/en'
 import { buildConfig } from 'payload'
 import sharp from 'sharp'
@@ -188,39 +187,33 @@ export default buildConfig({
   }),
 
   // -------------------------------------------------------------------------
-  // EMAIL. `nodemailerAdapter` speaks any Nodemailer transport, which turns the
-  // unresolved provider question (OQ-7b) into an ENVIRONMENT VARIABLE rather
-  // than an architecture decision.
+  // 🔴 NO `email` KEY, DELIBERATELY. THIS PRODUCT SENDS NO EMAIL.
   //
-  // In dev/staging it is called with NO ARGUMENTS: "if you pass nothing to
-  // nodemailerAdapter, it will use the ethereal.email service … logs the
-  // ethereal.email details to console on startup." Mail is captured, viewable at
-  // a printed URL, and NEVER delivered to a real inbox — which is simultaneously
-  // the documented satisfier of "staging must not send real notifications", at
-  // zero custom code.
+  // The business flow is: visitor submits the enquiry form → the row is written
+  // to Postgres → the administrator reads it in Admin → Enquiries. The database
+  // IS the inbox. Nothing about that flow needs a mail transport, so SMTP is not
+  // a dependency, not an environment variable and not a production blocker.
+  //
+  // ⚠️ MEASURED, NOT ASSUMED — this is why omitting the key is safe:
+  // Payload falls back to `consoleEmailAdapter`
+  // (node_modules/payload/dist/email/consoleEmailAdapter.js), whose `sendEmail`
+  // logs one line and RESOLVES. Nothing throws, nothing crashes at boot.
+  //
+  // It also removes a real liability the previous configuration carried: with no
+  // SMTP_HOST, `nodemailerAdapter()` provisioned an ETHEREAL.EMAIL TEST ACCOUNT
+  // OVER THE NETWORK ON EVERY BOOT — every `payload migrate`, every worker
+  // start, every test run. Boot depended on a third-party service that has
+  // nothing to do with this product.
+  //
+  // CONSEQUENCE, RECORDED: the Admin Panel's "Forgot password?" link cannot
+  // deliver. Recovery is `npm run admin:reset-password`, or another
+  // administrator editing the account in Admin → Users. RUNBOOK.md §7.
   // -------------------------------------------------------------------------
-  email:
-    isProduction && env.SMTP_HOST
-      ? nodemailerAdapter({
-          defaultFromAddress: env.EMAIL_FROM_ADDRESS,
-          defaultFromName: env.EMAIL_FROM_NAME,
-          transportOptions: {
-            host: env.SMTP_HOST,
-            port: env.SMTP_PORT,
-            // The docs defer to Nodemailer on when this should and should not
-            // be true, so it stays an env var rather than a hardcoded value.
-            secure: env.SMTP_SECURE,
-            ...(env.SMTP_USER && env.SMTP_PASS
-              ? { auth: { user: env.SMTP_USER, pass: env.SMTP_PASS } }
-              : {}),
-          },
-        })
-      : nodemailerAdapter(),
 
   // -------------------------------------------------------------------------
   jobs: {
     tasks,
-    // FIFO — the oldest lead is notified first.
+    // FIFO — the oldest queued job runs first.
     processingOrder: 'createdAt',
     access: {
       run: ({ req }) => {
@@ -235,9 +228,8 @@ export default buildConfig({
     },
     // The `autoRun` FALLBACK, for when a second container is refused on cost.
     // Gated so only ONE instance ever runs jobs: `true` on two instances
-    // produces DUPLICATE lead notifications.
-    // ⚠️ Not used in development: HMR disrupts cron schedules, and a developer
-    // relying on autoRun sees notifications stop after the first file save.
+    // produces DUPLICATE job executions.
+    // ⚠️ Not used in development: HMR disrupts cron schedules.
     //
     // 🔶 SCOPE LIMIT, RECORDED RATHER THAN SILENTLY ACCEPTED. `autoRun` does
     // schedule `schedule`-bearing tasks by default — but only "given the queue
@@ -274,15 +266,9 @@ export default buildConfig({
         delete: () => false,
       },
     }),
-    // ⚠️ MEASURED, AND IT CONTRADICTS THE PLAN'S ASSUMPTION:
-    // completed job rows are DELETED BY DEFAULT. After running the worker, the
-    // `payload_jobs` rows for successfully-completed `sendLeadNotification`
-    // tasks were gone, while `leads.notifiedAt` was correctly stamped.
-    //
-    // The plan said to leave this unset "because we WANT retention — a
-    // successfully sent lead notification is an operational record". Leaving it
-    // unset produces the OPPOSITE. Set explicitly so the operational record
-    // actually survives.
+    // ⚠️ MEASURED: completed job rows are DELETED BY DEFAULT. Set explicitly so
+    // a successful run stays visible in Admin → System → Jobs, which is the only
+    // place an administrator can see that the maintenance worker is alive.
     //
     // The watchdog is unaffected either way: a FAILED job is not complete, so
     // `hasError: true` rows are retained regardless.

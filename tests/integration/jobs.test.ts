@@ -41,8 +41,18 @@ const SCHEDULED = [
   { slug: 'watchdogFailedJobs', cron: '*/15 * * * *' },
 ] as const
 
-/** The two that are queued by a hook in response to an event, never scheduled. */
-const EVENT_DRIVEN = ['sendLeadNotification', 'revalidatePaths'] as const
+/**
+ * The one task that is queued by a hook in response to an event, never
+ * scheduled.
+ *
+ * ⚠️ IT USED TO BE TWO. `sendLeadNotification` was removed with the email
+ * subsystem: this product sends no email, so an enquiry has nothing to be
+ * forwarded to. See the "enquiries never touch the queue" block at the bottom
+ * of this file, which is the assertion that replaced the old
+ * "lead notifications reach the default queue" suite — it pins the STRONGER
+ * property that submitting an enquiry queues nothing at all.
+ */
+const EVENT_DRIVEN = ['revalidatePaths'] as const
 
 // ---------------------------------------------------------------------------
 // 1. Every maintenance task HAS a schedule, on the maintenance queue
@@ -148,7 +158,7 @@ describe('schedule cron expressions parse to the intended cadence', () => {
 // 3. Event-driven tasks stayed event-driven
 // ---------------------------------------------------------------------------
 
-describe('lead notification and revalidation are NOT scheduled', () => {
+describe('revalidation is NOT scheduled', () => {
   it.each(EVENT_DRIVEN)('"%s" has no schedule', (slug) => {
     expect(
       taskBySlug(slug).schedule,
@@ -254,17 +264,32 @@ describe('the maintenance worker processes the scheduled tasks', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 5. The default queue still carries lead notifications
+// 5. AN ENQUIRY NEVER TOUCHES THE QUEUE
+//
+// 🔴 THIS SUITE REPLACED ITS OWN OPPOSITE, AND THE INVERSION IS THE POINT.
+//
+// It used to assert "creating a lead queues sendLeadNotification on the default
+// queue", because delivery of an enquiry meant emailing it and the queue was the
+// transport. That design had a failure mode the test could not see: a dead
+// worker or a down mail provider meant the enquiry saved, the visitor was told
+// "we will call you back", and the business was told nothing — silently.
+//
+// Delivery is now the database row itself. So the property worth pinning is the
+// STRONGER one: submitting an enquiry queues NOTHING, which means no background
+// process can be between the visitor and the administrator seeing it, which
+// means no background process can lose it.
 // ---------------------------------------------------------------------------
 
-describe('lead notifications still reach the default queue', () => {
+describe('an enquiry is stored synchronously and queues no background work', () => {
   let payload: Payload
 
   beforeAll(async () => {
     payload = await getTestPayload()
   })
 
-  it('creating a lead queues sendLeadNotification on the default queue', async () => {
+  it('creating a lead queues NO jobs on any queue', async () => {
+    const before = await payload.count({ collection: 'payload-jobs', overrideAccess: true })
+
     const lead = await payload.create({
       collection: 'leads',
       overrideAccess: true,
@@ -276,36 +301,52 @@ describe('lead notifications still reach the default queue', () => {
       },
     })
 
-    const jobs = await payload.find({
-      collection: 'payload-jobs',
-      overrideAccess: true,
-      depth: 0,
-      limit: 50,
-      where: {
-        and: [{ queue: { equals: DEFAULT_QUEUE } }, { taskSlug: { equals: 'sendLeadNotification' } }],
-      },
-    })
+    const after = await payload.count({ collection: 'payload-jobs', overrideAccess: true })
 
     expect(
-      jobs.totalDocs,
-      'the lead saved but nothing was queued — the sales team would never be told',
-    ).toBeGreaterThan(0)
+      after.totalDocs,
+      'creating an enquiry queued a job — enquiry delivery must not depend on a worker being alive',
+    ).toBe(before.totalDocs)
 
-    const inputs = jobs.docs.map((d) => (d as { input?: { leadId?: string } }).input?.leadId)
-    expect(inputs).toContain(String(lead.id))
+    // And the enquiry really is there, readable by an administrator, with no
+    // intermediate step having run.
+    const stored = await payload.findByID({
+      collection: 'leads',
+      id: lead.id,
+      overrideAccess: true,
+      depth: 0,
+    })
+    expect(stored.name).toBe('Jobs Test Enquirer')
+    expect(stored.phone).toBe('9876500011')
   })
 
-  it('the lead notification job was NOT queued to the maintenance queue', async () => {
-    const stray = await payload.count({
-      collection: 'payload-jobs',
-      overrideAccess: true,
-      where: {
-        and: [
-          { queue: { equals: MAINTENANCE_QUEUE } },
-          { taskSlug: { equals: 'sendLeadNotification' } },
-        ],
-      },
-    })
-    expect(stray.totalDocs).toBe(0)
+  it('no task named sendLeadNotification is registered any more', () => {
+    // If this ever fails, the email subsystem has been partially reintroduced —
+    // which would silently re-open the "lead saved, nobody told" failure mode.
+    const slugs = (resolved.jobs?.tasks ?? []).map((t) => t.slug)
+    expect(slugs).not.toContain('sendLeadNotification')
+    expect(slugs.sort()).toEqual(
+      ['purgeLeadPii', 'revalidatePaths', 'sweepDeletedMedia', 'watchdogFailedJobs'],
+    )
+  })
+
+  it('the deployed worker commands name queues that tasks actually use', () => {
+    // The `--queue` argument in docker-compose.prod.yml and in the Railway start
+    // command is a bare string no constant can reach. A typo there is SILENT:
+    // the worker polls a queue nothing is queued to, forever, looking healthy.
+    const compose = readFileSync(path.resolve(process.cwd(), 'docker-compose.prod.yml'), 'utf8')
+    expect(compose).toContain(`'--queue', '${DEFAULT_QUEUE}'`)
+    expect(compose).toContain(`'--queue', '${MAINTENANCE_QUEUE}'`)
+    /**
+     * 🔴 EXACTLY ONE SERVICE MAY RUN `--handle-schedules`. Payload's docs are
+     * explicit that multiple servers handling schedules each queue their own
+     * copy, so a second one means every maintenance task runs twice a night.
+     *
+     * Counted in COMMAND POSITION — `'--handle-schedules'` with the quotes a
+     * YAML exec-form argument carries — rather than anywhere in the file. The
+     * comments above the services mention the flag by name twice, and a naive
+     * substring count would report three and fail on documentation.
+     */
+    expect(compose.match(/'--handle-schedules'/g)?.length).toBe(1)
   })
 })

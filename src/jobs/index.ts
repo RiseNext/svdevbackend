@@ -1,6 +1,5 @@
 import { JobCancelledError, type TaskConfig } from 'payload'
 
-import { renderLeadEmail, renderLeadEmailText } from '@/email/renderLeadEmail'
 import {
   LEAD_PII_RETENTION_DAYS,
   MAINTENANCE_QUEUE,
@@ -9,132 +8,24 @@ import {
 import { env } from '@/lib/env'
 
 /**
- * BACKGROUND WORK.
+ * BACKGROUND WORK — FOUR TASKS, AND NONE OF THEM TOUCHES AN ENQUIRY.
  *
- * 🔴 TWO DOCUMENTED SILENT-FAILURE MODES, both fatal for a lead-generation
- * product, and neither mentioned in any project document:
- *   1. With NO RUNNER configured, queued jobs "will never be executed" —
- *      nothing in the request path errors. The lead saves, the API returns 201,
- *      and no notification is sent.
- *   2. With NO EMAIL ADAPTER configured, Payload LOGS A WARNING RATHER THAN
- *      THROWING — a task can complete and report success having sent nothing.
+ * 🔴 THERE IS NO `sendLeadNotification` TASK, AND ITS ABSENCE IS THE DESIGN.
+ * An enquiry is delivered by being WRITTEN TO THE DATABASE; the administrator
+ * reads it in Admin → Enquiries. There is no notification to send, so there is
+ * no queue hop between the visitor pressing Submit and the enquiry being
+ * durably stored and visible. That removes the single largest silent-failure
+ * surface the previous design had: a lead could save, return 201, and be
+ * announced to nobody because a worker was dead or a mail provider was down.
  *
- * Both are indistinguishable from "business is quiet". Three controls close
- * them, and they are deliverables, not assumptions: the env boot guard
- * (src/schemas/env.ts), the supervised worker containers, and the watchdog
- * below alerting on a SECOND CHANNEL — because the failure being detected may be
- * that email is broken.
+ * ⚠️ The remaining runner-death failure mode is real but NO LONGER TOUCHES
+ * ENQUIRY DATA. With no runner, `revalidatePaths` retries never run (the site
+ * updates on its next ISR window instead) and the two maintenance tasks below
+ * stop. Nothing is lost; something is merely late.
  */
 
 const daysAgo = (days: number): string =>
   new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
-
-// ---------------------------------------------------------------------------
-
-export const sendLeadNotification: TaskConfig<'sendLeadNotification'> = {
-  slug: 'sendLeadNotification',
-  label: 'Send lead notification',
-  // A plain count is ALL the docs support. There is no documented backoff.
-  retries: 3,
-  inputSchema: [{ name: 'leadId', type: 'text', required: true }],
-  outputSchema: [{ name: 'emailSent', type: 'checkbox', required: true }],
-
-  handler: async ({ input, req }) => {
-    const to = env.SALES_NOTIFICATION_EMAIL
-    if (!to) {
-      // POISON INPUT. Retrying cannot help, and burning three attempts would
-      // hide the real failure behind `totalTried: 3`.
-      throw new JobCancelledError('SALES_NOTIFICATION_EMAIL is unset — retrying cannot help')
-    }
-
-    const lead = await req.payload.findByID({
-      collection: 'leads',
-      id: input.leadId,
-      overrideAccess: true,
-      depth: 0,
-      // A soft-deleted lead should still be notified about; it was real when
-      // it arrived.
-      trash: true,
-    })
-
-    if (!lead) throw new JobCancelledError(`Lead ${input.leadId} no longer exists`)
-
-    // IDEMPOTENCY SHORT-CIRCUIT. Retries are at-least-once; without this,
-    // three retries during a provider blip send the sales team three copies of
-    // the same lead.
-    if (lead.notifiedAt) return { output: { emailSent: true } }
-
-    const leadLike = {
-      name: String(lead.name),
-      phone: String(lead.phone),
-      projectNameSnapshot: (lead.projectNameSnapshot as string | null) ?? null,
-      message: (lead.message as string | null) ?? null,
-      source: String(lead.source),
-      sourcePath: (lead.sourcePath as string | null) ?? null,
-      createdAt: String(lead.createdAt),
-    }
-
-    /**
-     * The company name comes from the CMS, not from a literal in the template.
-     * A rename in Site Settings must reach the sales inbox too, or the one
-     * artefact the business sees every day is the one that keeps the old name.
-     *
-     * 🔴 WRAPPED, AND THE FALLBACK IS LOAD-BEARING. This is the most
-     * business-critical path in the system: a cosmetic lookup must never be able
-     * to fail a lead notification. If the global is unreachable the email still
-     * goes out, with the template's own default footer.
-     */
-    let siteName: string | undefined
-    try {
-      const settings = await req.payload.findGlobal({
-        slug: 'site-settings',
-        depth: 0,
-        overrideAccess: true,
-        req,
-        select: { name: true },
-      })
-      siteName = (settings as { name?: string } | null)?.name || undefined
-    } catch (err) {
-      req.payload.logger.warn(
-        { err },
-        'could not read site-settings for the lead email footer — sending with the default',
-      )
-    }
-
-    let result: unknown
-    try {
-      result = await req.payload.sendEmail({
-        to,
-        subject: `New enquiry — ${leadLike.projectNameSnapshot ?? 'general'} — ${leadLike.name}`,
-        html: renderLeadEmail(leadLike, siteName),
-        text: renderLeadEmailText(leadLike, siteName),
-      })
-    } catch (err) {
-      throw new Error(
-        `Lead notification send failed for ${input.leadId}: ${(err as Error).message}`,
-      )
-    }
-
-    // ⚠️ Whether `sendEmail` THROWS or RESOLVES on transport failure is NOT
-    // DOCUMENTED. This assertion covers the "resolved but did nothing" case,
-    // which is exactly what happens when no email adapter is configured. Without
-    // it the retry count is decorative and `hasError` never becomes true.
-    if (!result) {
-      throw new Error(`Lead notification produced no provider result for ${input.leadId}`)
-    }
-
-    await req.payload.update({
-      collection: 'leads',
-      id: input.leadId,
-      overrideAccess: true,
-      data: { notifiedAt: new Date().toISOString() },
-      // Not a human mutation; the audit log records people, not machinery.
-      context: { skipAudit: true, skipNotification: true },
-    })
-
-    return { output: { emailSent: true } }
-  },
-}
 
 // ---------------------------------------------------------------------------
 
@@ -370,11 +261,6 @@ export const watchdogFailedJobs: TaskConfig<'watchdogFailedJobs'> = {
    * It also matches the maintenance worker's own poll interval
    * (`--cron "*\/15 * * * *"` in docker-compose.prod.yml), so a due watchdog run
    * is never left waiting for the next tick.
-   *
-   * 🔴 THIS IS THE DEAD-LETTER DETECTOR. A `sendLeadNotification` that exhausts
-   * its retries during an SMTP outage is otherwise lost with nothing but a
-   * database row. Of the three tasks here it is the one whose absence actually
-   * loses business data, which is why it runs 96x more often than the others.
    */
   schedule: [{ cron: '*/15 * * * *', queue: MAINTENANCE_QUEUE }],
 
@@ -382,11 +268,14 @@ export const watchdogFailedJobs: TaskConfig<'watchdogFailedJobs'> = {
    * 🔴 PAYLOAD SHIPS NO DEAD-LETTER QUEUE, NO DOCUMENTED BACKOFF AND NO
    * ALERTING. "It's in the database" is not monitoring.
    *
-   * A transient failure (an SMTP outage) exhausts `retries: 3` FAST, so three
-   * quick retries can burn through a 20-minute provider outage and lose the
-   * notification with nothing but a database row to show for it. This task is
-   * the dead-letter path: it re-queues with `waitUntil` set 15 minutes out, at
-   * most twice, then alerts.
+   * ⚠️ SCOPE, NARROWED SINCE THE EMAIL SUBSYSTEM WAS REMOVED. No enquiry data
+   * can reach this path any more — an enquiry is stored synchronously and never
+   * queued. What this now catches is a stuck or repeatedly-failing
+   * `revalidatePaths`, whose visible symptom is "publishing does nothing to the
+   * website", and any maintenance task that has started failing.
+   *
+   * It re-queues with `waitUntil` set 15 minutes out, at most six times, then
+   * escalates to a `fatal` log line — which is what a log-based alert watches.
    *
    * ⚠️ `onFail` / `onSuccess` are DELIBERATELY NOT USED — they are listed in the
    * options table with no signature, no arguments and no example anywhere.
@@ -425,9 +314,9 @@ export const watchdogFailedJobs: TaskConfig<'watchdogFailedJobs'> = {
           req.payload.logger.error({ err, jobId: job.id }, 'watchdog could not re-queue job')
         }
       } else {
-        // 🔴 ALERT ON A SECOND CHANNEL — NOT EMAIL. The failure being detected
-        // may be that email is broken. This log line at `fatal` is what the
-        // monitoring stack alerts on.
+        // The escalation. A `fatal` log line is the alert channel — the product
+        // has no email, and adding one purely to alert about itself would be the
+        // notification system this project deliberately does not have.
         req.payload.logger.fatal(
           {
             jobId: job.id,
@@ -435,7 +324,7 @@ export const watchdogFailedJobs: TaskConfig<'watchdogFailedJobs'> = {
             error: (job as { error?: unknown }).error,
             totalTried: tried,
           },
-          'DEAD-LETTER: a job has exhausted its retries and re-queues. A lead notification may not have been delivered.',
+          'DEAD-LETTER: a job has exhausted its retries and re-queues. Enquiry data is unaffected — enquiries are stored synchronously — but background work is failing.',
         )
       }
       alerts += 1
@@ -458,7 +347,7 @@ export const watchdogFailedJobs: TaskConfig<'watchdogFailedJobs'> = {
     if (recent.totalDocs === 0) {
       req.payload.logger.warn(
         {},
-        'No leads received in 72 hours. If the site is live and getting traffic, check the contact form end to end.',
+        'No enquiries received in 72 hours. If the site is live and getting traffic, submit the contact form yourself and check it appears in Admin → Enquiries.',
       )
     }
 
@@ -466,10 +355,4 @@ export const watchdogFailedJobs: TaskConfig<'watchdogFailedJobs'> = {
   },
 }
 
-export const tasks = [
-  sendLeadNotification,
-  revalidatePaths,
-  purgeLeadPii,
-  sweepDeletedMedia,
-  watchdogFailedJobs,
-]
+export const tasks = [revalidatePaths, purgeLeadPii, sweepDeletedMedia, watchdogFailedJobs]

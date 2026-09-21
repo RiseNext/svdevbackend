@@ -1,9 +1,44 @@
 # AI-CONTEXT.md — Master context for SV Developers backend
 
 > **Read this first, every session.** It is the authoritative orientation document.
-> Last updated: **20 September 2026 (owner decision pass)** · Status: **BUILT and CONFIGURED — the backend exists, the D-015 gate PASSED, the frontend is integrated, production targets are chosen**
->
-> 🟢 **Owner decisions, 20 Sep 2026** — company name **SV Developers** (D-122, closes OQ-6) · media storage **Cloudinary** (D-123, closes OQ-7a, replaces S3) · database **Neon PostgreSQL** (D-124) · the **domain and privacy-policy URL are deliberately still open** (D-125, OQ-24).
+> Last updated: **21 September 2026 (production-readiness pass)** · Status: **BUILT, CONFIGURED and SCOPED DOWN — the backend exists, the D-015 gate PASSED, the frontend is integrated, production targets are chosen**
+
+---
+
+## 0. READ THIS BEFORE ANYTHING ELSE — the 21 Sep 2026 scope correction
+
+**The product is a plot-showcase website with an enquiry form.** A visitor
+browses projects, likes one, fills in the contact form; the enquiry is stored in
+Postgres; the administrator reads it in **Admin → Enquiries**. That is the whole
+business flow, and the implementation is now sized to it.
+
+🔴 **Much of the documentation in this folder was written against a larger
+design and is now HISTORICAL.** Where a document disagrees with this section,
+**this section wins.** The specific corrections:
+
+| Older docs say | Reality since 21 Sep 2026 |
+|---|---|
+| Lead notifications are emailed to a sales inbox via SMTP; `sendLeadNotification` is the most business-critical path in the system | **There is no email anywhere in this product.** The task, the hook, the `notifiedAt` column, `src/email/`, 8 env vars and `@payloadcms/email-nodemailer` are all removed. Storing the row **is** the delivery |
+| `POST /api/v1/leads` refuses submissions in production until `PRIVACY_POLICY_URL` is set (OQ-24, "the largest compliance gap") | **That variable is removed.** It was rendered nowhere and served to nobody, so it proved nothing while switching the product off. The privacy link is CMS content (`site-settings.legalLinks`) — a launch content task, `DEPLOYMENT-CHECKLIST.md` §5 |
+| Rate limiting is reverse-proxy configuration and is NOT in this application | **It is in the application** (`src/lib/rateLimit.ts`), because Railway has no reverse proxy. 5/min/IP + 3/hour/phone, keyed on the un-forgeable proxy hop |
+| The edge blocks `/payload-api/<slug>` from the public internet | **It never did in the real deployment.** Access control closes every private collection, in this repo, with tests. A REST kill switch was investigated and rejected — it would disable the Admin Panel |
+| 5 job tasks; a dead worker means lost leads | **4 tasks, none in the enquiry path.** A dead worker delays revalidation and nightly maintenance. It cannot lose an enquiry |
+| 27–29 environment variables | **18**, classified in `PRODUCTION-CONFIG.md` §5b |
+
+**Current, accurate documents:** `DEPLOYMENT-CHECKLIST.md` · `RUNBOOK.md` ·
+`PRODUCTION-CONFIG.md` · `ARCHITECTURE.md` §2 · `README.md`.
+**Historical planning artefacts, not maintained:** `MASTER-IMPLEMENTATION-PLAN.md`
+· `MASTER-IMPLEMENTATION-CHECKLIST.md` · `DOCUMENTATION-CORRECTIONS.md` ·
+`PHASE-1-GATE-REPORT.md` · `BACKEND-ROADMAP.md` · `INTEGRATIONS.md`.
+
+🔴 **The rule that follows from this: do not reintroduce a removed feature
+because a document in this folder describes it.** If a notification, a consent
+platform or a lead pipeline is ever genuinely wanted, it is a new decision with
+its own justification — not a template default being restored.
+
+---
+
+> 🟢 **Owner decisions, 20 Sep 2026** — company name **SV Developers** (D-122, closes OQ-6) · media storage **Cloudinary** (D-123, closes OQ-7a, replaces S3) · database **Neon PostgreSQL** (D-124) · the **domain is deliberately still open** (D-125). *(The privacy-policy URL is no longer a code-level open question — see §0.)*
 > **What to set before go-live, and what is still waiting on the owner:** [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md).
 >
 > 🟢 **What was actually built, measured rather than assumed:** [`PHASE-1-GATE-REPORT.md`](./PHASE-1-GATE-REPORT.md). It records four silent defects the gate caught, and every previously-unverified Payload behaviour that is now measured. **Read it before trusting a `NOT VERIFIED IN OFFICIAL DOCS` marker anywhere in this set — several are now resolved.**
@@ -142,12 +177,12 @@ The admin backend can change what the public website says about legally-regulate
 | Frontend | ✅ Built, and now **integrated with the CMS** on branch `feat/cms-integration`. Verified against a baseline build of `main`: **zero route regressions**, First Load JS unchanged-or-smaller |
 | **Architecture decision** | ✅ **DECIDED — Payload CMS 3 (§2b, D-015)** — reconfirmed 20 Sep 2026 against the official Payload 3 docs; **no technical blocker found** |
 | **Implementation plan** | ✅ **[`MASTER-IMPLEMENTATION-PLAN.md`](./MASTER-IMPLEMENTATION-PLAN.md)** + **[`MASTER-IMPLEMENTATION-CHECKLIST.md`](./MASTER-IMPLEMENTATION-CHECKLIST.md)** (20 Sep 2026) |
-| Backend code | ✅ **BUILT.** Payload 3.90.1 + Next 16.3.3 + PostgreSQL 15. 9 collections + 1 global, 50 physical tables, 7 public endpoints, 2 probes, **132 passing tests** |
+| Backend code | ✅ **BUILT.** Payload 3.90.1 + Next 16.3.3 + PostgreSQL 15. 9 collections + 1 global, **51 physical tables**, 7 public endpoints, 2 probes, **189 passing tests** |
 | Backend docs | ✅ This set (21 documents) |
-| Database | ✅ Created. Migrations 001 (schema) + 002 (consent CHECK) + 003 (`payload-jobs-stats` global + `payload_jobs.meta`, required by task scheduling), reversibility proven up→down→up on each |
+| Database | ✅ **PROVISIONED AND MIGRATED — real Neon production database, 21 Sep 2026.** Migrations 001 (schema) + 002 (consent CHECK) + 003 (`payload-jobs-stats` global + `payload_jobs.meta`) + 004 (drops `leads.notified_at` with the email subsystem), all four applied as batch 1. Verified on the live database: **51 tables**, 17 enums, 51 primary keys, 60 foreign keys, 244 indexes, `leads.notified_at` **absent**. Contains **no business data and no user accounts** — the owner creates the first administrator through Payload's own `/admin/create-first-user` flow |
 | Production targets | ✅ **CHOSEN 20 Sep 2026** — **Neon PostgreSQL** (D-124) + **Cloudinary** (D-123). Code, env schema and docs all reflect it; no migration was needed |
 | Hosting | ❌ Not provisioned. `Dockerfile`, `docker-compose.prod.yml`, `RUNBOOK.md` and `PRODUCTION-CONFIG.md` are ready |
-| Next step | **Owner deliverables** — see [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §4–§6. Nothing engineering-side blocks. Still open: the **domain**, the **privacy-policy URL**, **testimonials**, all `[BRACKETED]` values, the **registered legal entity name**, and the email provider |
+| Next step | **Owner deliverables** — see [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §4–§6 and [`DEPLOYMENT-CHECKLIST.md`](./DEPLOYMENT-CHECKLIST.md). Nothing engineering-side blocks. Still open: the **domain**, a **published privacy policy**, **Cloudinary credentials**, **testimonials**, all `[BRACKETED]` values, and the **registered legal entity name**. ⚠️ **There is no email provider to choose — the product sends no email**; an enquiry is delivered by being written to Postgres and read in Admin → Enquiries |
 
 ### 11b. Corrections established 20 September 2026
 

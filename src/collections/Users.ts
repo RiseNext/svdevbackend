@@ -8,9 +8,8 @@ import {
   MIN_PASSWORD_LENGTH,
   TOKEN_EXPIRATION_SECONDS,
 } from '@/lib/constants'
-import { env, isProduction } from '@/lib/env'
+import { isProduction } from '@/lib/env'
 import { isBreachedPassword } from '@/lib/passwordPolicy'
-import { renderBrandedEmail } from '@/email/renderBrandedEmail'
 import { auditForgotPassword, auditLogin, auditLogout } from '@/hooks/authEvents'
 
 /**
@@ -55,22 +54,30 @@ export const Users: CollectionConfig = {
       // `domain` deliberately NOT set — the admin and the API share one host.
     },
 
+    /**
+     * 🔴 THE "FORGOT PASSWORD?" LINK IN THE ADMIN PANEL CANNOT DELIVER ANYTHING,
+     * AND THAT IS A DELIBERATE, DOCUMENTED TRADE, NOT AN OVERSIGHT.
+     *
+     * This product sends no email (payload.config.ts declares no `email` key),
+     * so a reset token has no way of reaching a mailbox. Payload exposes no flag
+     * to remove the link, and overriding the whole Login view to hide one anchor
+     * would be more code and more upgrade risk than the problem is worth.
+     *
+     * ⚠️ THE CAPABILITY IS REPLACED, NOT DROPPED. Password recovery is:
+     *   1. another administrator sets a new password in Admin → Users, or
+     *   2. `npm run admin:reset-password -- <email>` from a workstation, which
+     *      is why that script exists — a single-administrator deployment would
+     *      otherwise be one forgotten password away from a permanent lockout.
+     * RUNBOOK.md §7 carries the procedure.
+     *
+     * The two settings below still do real work and are kept: the token TTL
+     * bounds a leaked token, and `minRequestInterval` is the ONLY throttle
+     * Payload gives on this path — load-bearing here because Railway provides no
+     * edge at which to write one.
+     */
     forgotPassword: {
       expiration: 60 * 60 * 1000,
-      // The only throttle Payload gives us on this path. The real rate limit is
-      // at the edge, alongside the login limit.
       minRequestInterval: 15_000,
-      generateEmailSubject: () => 'Reset your SV Developers admin password',
-      generateEmailHTML: (args) => {
-        const token = (args as { token?: string } | undefined)?.token ?? ''
-        const url = `${env.NEXT_PUBLIC_SERVER_URL}/admin/reset/${token}`
-        return renderBrandedEmail({
-          heading: 'Reset your password',
-          intro:
-            'Someone asked to reset the password for your SV Developers admin account. If that was not you, you can ignore this email — nothing has changed.',
-          bodyHtml: `<p style="margin:24px 0"><a href="${url}" style="background:#1a1a1a;color:#ffffff;padding:12px 20px;border-radius:4px;text-decoration:none;display:inline-block">Reset password</a></p><p style="font-size:13px;color:#666">This link expires in one hour and can be used once.</p>`,
-        })
-      },
     },
 
     // loginWithUsername: NOT used — email login is correct for a 2-person team.

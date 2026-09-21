@@ -43,16 +43,53 @@ const parseEnvFile = (contents: string): Record<string, string> => {
 }
 
 const root = process.cwd()
+
+/**
+ * 🔴 A KEY DECLARED IN `.env.test` IS PINNED, EVEN WHEN ITS VALUE IS EMPTY.
+ *
+ * This is the whole reason `.env.test` exists, and it used to leak. The loop
+ * below treated `''` as "not set yet" and let the NEXT file fill it in — so
+ * `.env.test`'s deliberately-blank `CLOUDINARY_CLOUD_NAME=` was overwritten by
+ * whatever the developer happened to have in their personal `.env`.
+ *
+ * ⚠️ IT BROKE A TEST THE MOMENT REAL CREDENTIALS EXISTED, and the failure
+ * pointed nowhere near the cause. `cloudinaryUrl.test.ts` simulates the
+ * unconfigured local-disk path by blanking the cloud name alone; with a real
+ * `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` bleeding in from `.env`,
+ * that produced a PARTIAL Cloudinary configuration, which the environment
+ * schema correctly rejects — so the suite died with "Invalid environment.
+ * Refusing to boot." on a machine where nothing was wrong with the code. The
+ * suite passed or failed according to a file that is not in the repository.
+ *
+ * 🔴 IT ALSO PULLED PRODUCTION SECRETS INTO EVERY TEST PROCESS. `.env` now
+ * holds the real Neon and Cloudinary credentials. Blank-means-unset let them
+ * into a process whose entire purpose is to run against disposable fixtures.
+ * `.env.test` should be the floor, and now is.
+ *
+ * The CI override is UNAFFECTED and is still the point: a variable already
+ * present in the real process environment beats both files, which is how CI
+ * points the suite at the disposable database on port 5433.
+ */
+const pinnedByTestEnv = new Set<string>()
+
 for (const file of ['.env.test', '.env']) {
   const full = path.join(root, file)
   if (!existsSync(full)) continue
+  const isTestEnv = file === '.env.test'
   const parsed = parseEnvFile(readFileSync(full, 'utf8'))
   for (const [key, value] of Object.entries(parsed)) {
+    // `.env` must never reopen a decision `.env.test` already made.
+    if (!isTestEnv && pinnedByTestEnv.has(key)) continue
+
     // An explicitly-provided variable ALWAYS wins — that is how CI points the
-    // suite at the disposable test database on port 5433.
+    // suite at the disposable test database on port 5433. `''` counts as
+    // absent HERE, at the process-environment boundary only: a shell that
+    // exports an empty value is expressing nothing, whereas a file that
+    // declares one is expressing "empty".
     if (process.env[key] === undefined || process.env[key] === '') {
       process.env[key] = value
     }
+    if (isTestEnv) pinnedByTestEnv.add(key)
   }
 }
 

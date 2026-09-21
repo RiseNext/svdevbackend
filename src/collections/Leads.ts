@@ -7,7 +7,6 @@ import { blockLeadHardDelete } from '@/hooks/hardDeleteGuard'
 import {
   derivePhoneNormalised,
   digitsOnly,
-  enqueueLeadNotification,
   isJunkPhone,
   leadDedupe,
   normaliseText,
@@ -18,20 +17,34 @@ import {
  * `leads` — THE ONLY FEATURE THAT GENUINELY REQUIRES A BACKEND.
  *
  * PRD §1 problem 2, verbatim: "Every enquiry typed into that form today is lost."
- * `ContactForm.tsx:45-50` does not even fake a success — it tells the visitor
- * nothing was sent, on the stated principle that "a visitor told 'we'll call you
- * back' when nothing was sent is worse off than one who sees no form at all."
+ * `ContactForm.tsx` does not fake a success — it tells the visitor nothing was
+ * sent, on the stated principle that "a visitor told 'we'll call you back' when
+ * nothing was sent is worse off than one who sees no form at all."
  * Everything here exists to keep that honesty while making the outcome true.
  *
- * 🔴 FR-LEAD-15: NEVER exposed on any public endpoint. Ever. Four independent
- * facts make that true, and each is testable:
- *   1. `access.read: isAdmin` — Payload's GENERATED REST route returns nothing
- *      anonymously.
+ * 🔴 STORING THE ROW IS THE DELIVERY. There is no notification, no email and no
+ * queue between Submit and the administrator seeing the enquiry: the POST
+ * returns 201 only after the row is committed, and Admin → Enquiries reads that
+ * row. A background worker being dead cannot lose an enquiry, because no
+ * enquiry ever passes through one.
+ *
+ * 🔴 FR-LEAD-15: NEVER exposed on any public endpoint. Ever. Three independent
+ * facts make that true IN THE APPLICATION ITSELF, and each is covered by a test
+ * in tests/integration/accessControl.test.ts:
+ *   1. `access.read: isAdmin` — Payload's GENERATED REST route at
+ *      `/payload-api/leads` returns 403 to an anonymous caller, and the Local
+ *      API returns zero documents when access is not overridden.
  *   2. GraphQL is disabled entirely, so there is no second shape.
  *   3. NO PUBLIC SERIALISER FOR LEADS EXISTS. There is no `toPublicLead()`
  *      anywhere, and `publicFind()` is TYPED to the collections it may read —
  *      `leads` is not one of them, so a public handler cannot even name it.
- *   4. The edge blocks `/payload-api/leads` from the public internet.
+ *
+ * ⚠️ A FOURTH FACT WAS REMOVED BECAUSE IT WAS NOT TRUE OF THE REAL DEPLOYMENT.
+ * This comment used to claim "the edge blocks /payload-api/leads from the public
+ * internet". Railway terminates TLS and routes straight to the container — there
+ * is no reverse proxy to write that rule in. The three facts above are the
+ * control, they live in this repository, and they are tested. Nothing was
+ * weakened; a control that did not exist stopped being counted.
  */
 export const Leads: CollectionConfig = {
   slug: 'leads',
@@ -80,7 +93,7 @@ export const Leads: CollectionConfig = {
     // hard delete through the Local API — measured, see the hook. Without this,
     // a lead is one `payload.delete()` away from being gone forever.
     beforeDelete: [blockLeadHardDelete],
-    afterChange: [enqueueLeadNotification, auditAfterChange],
+    afterChange: [auditAfterChange],
     afterDelete: [auditAfterDelete],
   },
 
@@ -190,19 +203,10 @@ export const Leads: CollectionConfig = {
       },
       access: serverOnlyField,
     },
-    {
-      name: 'notifiedAt',
-      type: 'date',
-      admin: {
-        position: 'sidebar',
-        readOnly: true,
-        description: 'When the sales notification was sent.',
-      },
-      // Makes `sendLeadNotification` IDEMPOTENT. Retries are at-least-once:
-      // without this marker, three retries during a provider blip send the sales
-      // team three copies of the same lead.
-      access: serverOnlyField,
-    },
+    // `notifiedAt` WAS REMOVED (migration 004). It was the idempotency marker
+    // for `sendLeadNotification`, and that task no longer exists: nothing is
+    // sent, so there is nothing to mark. `createdAt` is when the enquiry
+    // arrived, and `isRead` below is the administrator's own housekeeping.
     {
       name: 'consentGiven',
       type: 'checkbox',

@@ -69,17 +69,27 @@ export const envSchema = z
     // library, which is why this is the stricter check.
     CLOUDINARY_DELIVERY_BASE_URL: originUrl.optional(),
 
-    // ---- Email -------------------------------------------------------------
-    SMTP_HOST: z.string().min(1).optional(),
-    SMTP_PORT: z.coerce.number().int().positive().max(65535).optional(),
-    SMTP_SECURE: bool.default(false),
-    SMTP_USER: z.string().min(1).optional(),
-    SMTP_PASS: z.string().min(1).optional(),
-    EMAIL_FROM_ADDRESS: z.string().email(),
-    EMAIL_FROM_NAME: z.string().min(1),
-    SALES_NOTIFICATION_EMAIL: z.string().email().optional(),
+    // ---- Email — DELIBERATELY ABSENT ---------------------------------------
+    // 🔴 THE PRODUCT SENDS NO EMAIL. An enquiry is stored in Postgres and read
+    // by the administrator in the Admin Panel; that IS the delivery mechanism.
+    // There is no SMTP host, no from-address, no sales inbox and no notification
+    // task, so there are no variables here and production needs no mail
+    // credentials. Payload falls back to its own `consoleEmailAdapter` (it logs
+    // and resolves), which is why removing the `email` key from the config is
+    // safe rather than a crash waiting to happen.
+    //
+    // CONSEQUENCE, RECORDED RATHER THAN DISCOVERED LATER: the Admin Panel's
+    // "Forgot password?" link cannot deliver anything. Recovery is
+    // `npm run admin:reset-password` or another administrator editing the user
+    // in Admin → Users. See RUNBOOK.md §7.
 
     // ---- Jobs + revalidation ----------------------------------------------
+    // OPTIONAL EVERYWHERE, INCLUDING PRODUCTION. It only guards HTTP-triggered
+    // job runs, and `jobs.access.run` FAILS CLOSED when it is unset: with no
+    // secret, an HTTP run is refused outright. The deployed workers authenticate
+    // as local processes, not over HTTP, so leaving this empty is the SAFER
+    // configuration — requiring it would force the owner to mint a secret whose
+    // only effect is to open a door nothing uses.
     CRON_SECRET: z.string().min(32).optional(),
     ENABLE_JOB_WORKERS: bool.default(false),
     REVALIDATE_WEBHOOK_URL: z.string().url().optional(),
@@ -90,11 +100,21 @@ export const envSchema = z
     DISABLE_LOGGING: bool.default(false),
     PAYLOAD_SEED: bool.default(false),
 
-    // ---- Compliance gate ---------------------------------------------------
-    // OQ-24: collecting PII without a reachable privacy policy is the largest
-    // compliance gap in the project (DPDP Act). POST /api/v1/leads refuses to
-    // accept submissions in production until this resolves to a real URL.
-    PRIVACY_POLICY_URL: z.string().url().optional(),
+    // ---- Privacy policy — NOT AN ENVIRONMENT VARIABLE ----------------------
+    // 🔴 `PRIVACY_POLICY_URL` WAS REMOVED, and the removal is evidence-based
+    // rather than a relaxation of a control.
+    //
+    // It was read in exactly one place — a boolean that made POST /api/v1/leads
+    // answer 503 in production. It was NEVER rendered, NEVER served to the
+    // frontend and NEVER linked from anything a visitor could see, so setting it
+    // proved nothing about whether a policy existed and leaving it unset
+    // disabled the one feature the site is for.
+    //
+    // The link a visitor actually follows is CMS DATA:
+    // `site-settings.legalLinks`, rendered by svfrontend's Footer. That is the
+    // real mechanism, it is editable without a redeploy, and it is a content
+    // task for the owner — not a backend environment variable and not a boot
+    // guard. DEPLOYMENT-CHECKLIST.md carries it as a launch item.
   })
   .superRefine((v, ctx) => {
     // ---- ALL ENVIRONMENTS ---------------------------------------------------
@@ -128,20 +148,18 @@ export const envSchema = z
     // everywhere would leave production unguarded. The split is the point.
     if (v.NODE_ENV !== 'production') return
 
+    // 🔴 FIVE KEYS, AND EVERY ONE OF THEM BREAKS A USER-VISIBLE FEATURE IF
+    // ABSENT. Nothing is required here to satisfy a checklist.
     const requiredInProd = [
       // Media MUST be in Cloudinary in production. Local disk on a container
       // host means every uploaded asset is destroyed by the next deploy.
       'CLOUDINARY_CLOUD_NAME',
       'CLOUDINARY_API_KEY',
       'CLOUDINARY_API_SECRET',
-      // The email boot guard. With no adapter configured, Payload logs a warning
-      // and the send silently APPEARS TO SUCCEED. For a lead-generation product,
-      // reporting success while sending nothing is the only truly unacceptable
-      // failure mode. (Plan §14.5.)
-      'SMTP_HOST',
-      'SMTP_PORT',
-      'SALES_NOTIFICATION_EMAIL',
-      'CRON_SECRET',
+      // Without these, publishing in the Admin Panel appears to work and the
+      // website silently never updates until the next ISR window. The mismatch
+      // case is worse than the missing case: a wrong secret is rejected with a
+      // 401 that only the job log sees.
       'REVALIDATE_WEBHOOK_URL',
       'REVALIDATE_SECRET',
     ] as const
@@ -190,14 +208,6 @@ export const ENV_KEYS = [
   'CLOUDINARY_API_KEY',
   'CLOUDINARY_API_SECRET',
   'CLOUDINARY_DELIVERY_BASE_URL',
-  'SMTP_HOST',
-  'SMTP_PORT',
-  'SMTP_SECURE',
-  'SMTP_USER',
-  'SMTP_PASS',
-  'EMAIL_FROM_ADDRESS',
-  'EMAIL_FROM_NAME',
-  'SALES_NOTIFICATION_EMAIL',
   'CRON_SECRET',
   'ENABLE_JOB_WORKERS',
   'REVALIDATE_WEBHOOK_URL',
@@ -205,5 +215,4 @@ export const ENV_KEYS = [
   'LOG_LEVEL',
   'DISABLE_LOGGING',
   'PAYLOAD_SEED',
-  'PRIVACY_POLICY_URL',
 ] as const

@@ -147,6 +147,7 @@ npm run build            # needs production-shaped env — see .env.ci.example
 | `npm run generate:db-schema` | Emit the Drizzle schema. **Read it before writing a migration** |
 | `npm run jobs:run` | Drain the default queue once |
 | `npm run jobs:loop` | Run the default queue on a cron |
+| `npm run admin:reset-password -- <email>` | **Break-glass.** Sets a generated password on an administrator account and prints it once. This is the replacement for the email reset link, which cannot deliver — there is no email |
 | `npm run check:drift` | Icon enum · public contract · `.env.example` — all three cross-file guards |
 | `npm run check:cms` | Proves every collection and the global are reachable and editable by an admin, by **executing** the access functions rather than reading the config |
 | `npm run sandbox:reset` | Destroy and recreate the local database |
@@ -166,6 +167,9 @@ src/
                         mediaUrl (the ONE definition of a public media URL)
   serializers/          the public contract. `...doc` spread is BANNED here
   lib/                  publicFind · definePublicEndpoint · errors · env · icons
+                        rateLimit — abuse control, in the app because the
+                        deployment has no reverse proxy to put it in
+  jobs/                 4 tasks. NONE of them touches an enquiry
   app/(payload)/        VENDOR CODE — generated, never edited
   app/(public)/api/v1/  our public surface — 7 routes
   app/healthz|livez/    probes, deliberately OUTSIDE /api
@@ -187,14 +191,41 @@ is chosen and enforced.
 | `GET` | `/api/v1/testimonials` | Published **and consented** only |
 | `GET` | `/api/v1/faqs` | Ordered |
 | `GET` | `/api/v1/statistics` | Ordered. `value` is authored text |
-| `POST` | `/api/v1/leads` | The only public write in the system |
+| `POST` | `/api/v1/leads` | The only public write in the system. 5/min/IP + 3/hour/phone |
 | `GET` | `/healthz` · `/livez` | Readiness (touches the DB) · liveness (does not) |
 
-Payload's own generated REST lives at `/payload-api/**` and is additionally
-blocked at the edge. **GraphQL is disabled** and its route files are not present,
-so the 404 is structural.
+Payload's own generated REST lives at `/payload-api/**`. **It is closed by access
+control, in this repository** — `leads`, `users`, `audit-log` and `payload-jobs`
+return nothing to an anonymous caller, and the content collections return only
+published rows. There is deliberately **no REST kill switch**: the Admin Panel is
+a client-side app that talks to that same prefix, so a switch would disable the
+CMS. See `RUNBOOK.md` §4.2 and `tests/integration/accessControl.test.ts`.
+
+⚠️ An earlier version of this README said `/payload-api/**` was "additionally
+blocked at the edge". It is not, and never was in the real deployment — Railway
+routes straight to the container. The claim was removed rather than left as
+reassurance.
+
+**GraphQL is disabled** and its route files are not present, so the 404 is
+structural.
+
+## What this backend deliberately does not do
+
+| Not built | Why |
+|---|---|
+| **Send email** | An enquiry is stored in Postgres and read in Admin → Enquiries. The database is the inbox. No SMTP, no from-address, no sales inbox, no notification task — and therefore no way for a dead worker or a mail outage to lose an enquiry |
+| **Lead pipeline / status / CRM** | One administrator reading a list. `leadStatus` was explicitly rejected rather than deferred |
+| **Consent-management or cookie platform** | The site sets no tracking cookies. The consent artefact is one editable sentence beside the submit button |
+| **GraphQL** | A handful of fixed shapes, hand-written |
+| **Redis / external queue** | ISR is the cache; a database-backed job table covers the four background tasks |
+
+⚠️ **Consequence of no email, recorded so it is not a surprise:** the Admin
+Panel's "Forgot password?" link cannot deliver. Recovery is
+`npm run admin:reset-password -- <email>`, or another administrator setting the
+password in Admin → Users. `RUNBOOK.md` §7.
 
 ## Deployment
 
-See [`docs/RUNBOOK.md`](./docs/RUNBOOK.md) for the full sequence, rollback,
-restore and the break-glass procedures.
+[`docs/DEPLOYMENT-CHECKLIST.md`](./docs/DEPLOYMENT-CHECKLIST.md) is the go-live
+list. [`docs/RUNBOOK.md`](./docs/RUNBOOK.md) is the full sequence, rollback,
+restore and break-glass procedures.

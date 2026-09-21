@@ -23,6 +23,7 @@
     "migrate:down": "npm run payload -- migrate:down",
     "seed": "npm run payload -- run src/seed/index.ts",
     "seed:rasterise": "npm run payload -- run src/seed/rasterise.ts",
+    "admin:reset-password": "npm run payload -- run src/scripts/resetAdminPassword.ts",
     "jobs:run": "npm run payload -- jobs:run --queue default --limit 25",
     "jobs:loop": "npm run payload -- jobs:run --cron \"* * * * *\" --queue default --limit 25",
     "jobs:maintenance": "npm run payload -- jobs:run --cron \"*/15 * * * *\" --queue maintenance --handle-schedules",
@@ -39,7 +40,6 @@
   },
   "dependencies": {
     "@payloadcms/db-postgres": "3.90.1",
-    "@payloadcms/email-nodemailer": "3.90.1",
     "@payloadcms/next": "3.90.1",
     "@payloadcms/plugin-cloud-storage": "3.90.1",
     "@payloadcms/ui": "3.90.1",

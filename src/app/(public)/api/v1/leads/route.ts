@@ -9,9 +9,18 @@ import {
   definePublicEndpoint,
   readJsonBody,
 } from '@/lib/definePublicEndpoint'
-import { PublicApiError, validationError } from '@/lib/errors'
-import { env, leadCaptureAllowed } from '@/lib/env'
-import { HONEYPOT_FIELD, IDEMPOTENCY_TTL_MS } from '@/lib/constants'
+import { rateLimited, validationError } from '@/lib/errors'
+import { env } from '@/lib/env'
+import {
+  HONEYPOT_FIELD,
+  IDEMPOTENCY_TTL_MS,
+  LEAD_RATE_LIMIT_IP_WINDOW_MS,
+  LEAD_RATE_LIMIT_PER_IP,
+  LEAD_RATE_LIMIT_PER_PHONE,
+  LEAD_RATE_LIMIT_PHONE_WINDOW_MS,
+} from '@/lib/constants'
+import { toE164 } from '@/hooks/leadHooks'
+import { consumeRateLimit } from '@/lib/rateLimit'
 import { honeypotTriggered, leadBodySchema, validateLeadBody } from '@/schemas/lead'
 
 /**
@@ -19,9 +28,15 @@ import { honeypotTriggered, leadBodySchema, validateLeadBody } from '@/schemas/l
  * runtime call a visitor's browser makes to the backend.
  *
  * PRD §1 problem 2: "Every enquiry typed into that form today is lost."
- * `ContactForm.tsx:45-50` does not even fake a success — it tells the visitor
- * nothing was sent. This endpoint exists to keep that honesty while making the
- * outcome true, which is why SUCCESS IS ONLY EVER RETURNED FOR A REAL WRITE.
+ * `ContactForm.tsx` does not fake a success — it tells the visitor nothing was
+ * sent. This endpoint exists to keep that honesty while making the outcome true,
+ * which is why SUCCESS IS ONLY EVER RETURNED FOR A REAL WRITE.
+ *
+ * 🔴 201 MEANS THE ROW IS COMMITTED. Nothing is queued, nothing is emailed and
+ * nothing is deferred to a worker: `payload.create()` returns after the insert,
+ * and the administrator reads that exact row in Admin → Enquiries. There is no
+ * gap between "the visitor was told we will call back" and "the business can
+ * see the enquiry".
  */
 
 /**
@@ -62,10 +77,53 @@ const deriveSourcePath = (req: Request): string | null => {
   }
 }
 
+/**
+ * The CLAIMED client address, for the stored record. Leftmost `X-Forwarded-For`
+ * entry — the conventional "original client" position.
+ *
+ * ⚠️ CLIENT-INFLUENCED AND STORED AS SUCH. A visitor may send their own
+ * `X-Forwarded-For`, and a well-behaved proxy appends rather than replaces, so
+ * the leftmost value is a CLAIM. That is acceptable for a field whose only use
+ * is a human glancing at where an enquiry came from, and it is purged after 90
+ * days regardless. It is NOT acceptable as a rate-limit key — see below.
+ */
 const clientIp = (req: Request): string | null => {
   const fwd = req.headers.get('x-forwarded-for')
   if (fwd) return fwd.split(',')[0]!.trim().slice(0, 100)
   return req.headers.get('x-real-ip')?.slice(0, 100) ?? null
+}
+
+/**
+ * 🔴 THE RATE-LIMIT KEY, AND IT IS DELIBERATELY NOT `clientIp()`.
+ *
+ * Rate limiting on the LEFTMOST `X-Forwarded-For` entry is not rate limiting at
+ * all: the attacker supplies that value, so rotating it gives an unlimited
+ * budget and the whole control evaporates silently while still looking present
+ * in the code.
+ *
+ * The RIGHTMOST entry is the one appended by the proxy directly in front of this
+ * container — on Railway, its edge. A client cannot forge a value into that
+ * position, because anything it sends is pushed left by the appended hop.
+ *
+ * ⚠️ THE ASSUMPTION THIS RESTS ON, STATED RATHER THAN BURIED: exactly ONE
+ * trusted hop in front of the app. That is true of Railway and of the
+ * docker-compose shape in this repository. If a CDN is ever put in front, the
+ * rightmost entry becomes the CDN's egress IP — every visitor would then share
+ * one bucket and legitimate traffic would be throttled. Revisit here, not at the
+ * call site.
+ */
+const rateLimitKey = (req: Request): string => {
+  const fwd = req.headers.get('x-forwarded-for')
+  if (fwd) {
+    const hops = fwd.split(',').map((h) => h.trim()).filter(Boolean)
+    const nearest = hops[hops.length - 1]
+    if (nearest) return `ip:${nearest.slice(0, 100)}`
+  }
+  const real = req.headers.get('x-real-ip')?.trim()
+  if (real) return `ip:${real.slice(0, 100)}`
+  // No proxy headers at all — direct connection, or a test. One shared bucket is
+  // the correct fallback: it is restrictive, not permissive.
+  return 'ip:unknown'
 }
 
 const successBody = (id: string, createdAt: string) => ({
@@ -76,21 +134,27 @@ const successBody = (id: string, createdAt: string) => ({
 
 const handler = async (req: Request) => {
   /**
-   * 🔴 THE OQ-24 COMPLIANCE GATE.
+   * 🔴 THE PER-IP LIMIT, FIRST, BEFORE ANY PARSING OR ANY DATABASE WORK.
    *
-   * Collecting a name and a phone number without a reachable privacy policy is
-   * the largest compliance gap in the project under India's DPDP Act. In
-   * production this endpoint REFUSES SUBMISSIONS until PRIVACY_POLICY_URL is
-   * configured. It is deliberately a 503, not a 404: the endpoint exists, it is
-   * simply not lawfully usable yet, and that distinction is what makes the
-   * failure visible rather than looking like a routing bug.
+   * ⚠️ WHAT THIS REPLACED, AND WHY THAT IS AN IMPROVEMENT RATHER THAN A
+   * RELAXATION. This position previously held a compliance gate that made the
+   * endpoint answer 503 in production unless a `PRIVACY_POLICY_URL` environment
+   * variable was set. That variable was never rendered, never served to the
+   * frontend and never linked from anything a visitor could see — setting it
+   * proved nothing about whether a policy existed, and leaving it unset switched
+   * off the only feature this website is for. The privacy link a visitor
+   * actually follows is CMS content (`site-settings.legalLinks`, rendered by the
+   * frontend Footer); it is a launch checklist item for the owner, not a boot
+   * guard, and it now lives in DEPLOYMENT-CHECKLIST.md.
+   *
+   * What sits here instead is a control that does real work on every request.
    */
-  if (!leadCaptureAllowed) {
-    throw new PublicApiError(
-      'INTERNAL_ERROR',
-      'The enquiry form is temporarily unavailable. Please call us instead.',
-    )
-  }
+  const ipLimit = consumeRateLimit(
+    rateLimitKey(req),
+    LEAD_RATE_LIMIT_PER_IP,
+    LEAD_RATE_LIMIT_IP_WINDOW_MS,
+  )
+  if (!ipLimit.allowed) throw rateLimited(ipLimit.retryAfterSeconds)
 
   // 415 for the wrong content type; 400/413 for a body that cannot be read.
   // These are DIFFERENT failures with different codes, deliberately.
@@ -129,8 +193,10 @@ const handler = async (req: Request) => {
    * is why that constant is shared rather than spelled twice.
    *
    * ⚠️ REMAINING SCOPE NOTE: a honeypot stops naive form-fillers, not a bot that
-   * reads the DOM. Rate limiting is still edge/proxy configuration (D-030,
-   * RUNBOOK.md §4) and is NOT in this application.
+   * reads the DOM. THE RATE LIMITS ABOVE AND BELOW ARE WHAT BOUND THAT BOT —
+   * they are now in this application rather than deferred to an edge proxy the
+   * real deployment does not have. A honeypot hit still consumes the per-IP
+   * budget, because the IP limit is charged before this point.
    */
   if (honeypotTriggered(body)) {
     return successBody(randomUUID(), new Date().toISOString())
@@ -159,6 +225,38 @@ const handler = async (req: Request) => {
     const replay = idempotencyCache.get(idempotencyKey)
     // Replay the ORIGINAL 201 verbatim.
     if (replay) return replay.body
+  }
+
+  /**
+   * ---- THE PER-PHONE LIMIT ------------------------------------------------
+   *
+   * 🔴 DELIBERATELY AFTER THE IDEMPOTENCY REPLAY. A replayed request is the SAME
+   * submission arriving twice on a flaky mobile connection; charging it a second
+   * time against the phone's budget would punish bad signal.
+   *
+   * It is keyed on the E.164 NORMALISED number, not the raw string, so
+   * "98765 00011", "+919876500011" and "9876500011" are one bucket rather than
+   * three. That normalisation is the same function the collection hook uses, so
+   * the limiter and the dedupe agree on what "the same number" means.
+   *
+   * 🔴 THIS IS THE LAYER THE PER-IP LIMIT CANNOT PROVIDE. A residential proxy
+   * pool gives an attacker a fresh IP per request for pennies; it does not give
+   * them a fresh phone number. It is also the limit the RUNBOOK always said had
+   * to live here — "the edge cannot see the request body".
+   *
+   * ⚠️ IT IS NOT THE DEDUPE, and the two are not redundant. The dedupe collapses
+   * a repeat of the SAME (phone, project) pair inside 10 minutes and answers 201
+   * because that is a keen buyer. This bounds a number being used to generate
+   * MANY DIFFERENT enquiries across many projects, and answers 429.
+   */
+  const phoneKey = toE164(body.phone)
+  if (phoneKey) {
+    const phoneLimit = consumeRateLimit(
+      `phone:${phoneKey}`,
+      LEAD_RATE_LIMIT_PER_PHONE,
+      LEAD_RATE_LIMIT_PHONE_WINDOW_MS,
+    )
+    if (!phoneLimit.allowed) throw rateLimited(phoneLimit.retryAfterSeconds)
   }
 
   const payload = await getPayload({ config: configPromise })

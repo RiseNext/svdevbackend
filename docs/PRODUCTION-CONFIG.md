@@ -24,8 +24,18 @@ Written 20 September 2026, at the owner-decision pass that followed implementati
 | 2 | Production media storage is **Cloudinary** | D-123 — closes OQ-7a, supersedes D-112 |
 | 3 | Production database is **Neon PostgreSQL** | D-124 |
 | 4 | The final **domain is deliberately not chosen yet** | D-125 — D-109 stays INTERIM |
-| 5 | The **privacy-policy URL is still unknown** and the lead-capture safeguard stays | Unchanged — OQ-24 remains open |
+| 5 | The **privacy-policy URL is still unknown** and the lead-capture safeguard stays | ⚠️ **SUPERSEDED 21 Sep 2026** — see §5 |
 | 6 | **No testimonials are seeded or invented** | Unchanged — OQ-23 remains open |
+
+## 1b. Decisions taken on 21 September 2026 — the production-readiness pass
+
+| # | Decision | Effect |
+|---|---|---|
+| 7 | **This product sends no email.** An enquiry is delivered by being written to Postgres and read in Admin → Enquiries | 8 environment variables, 1 job task, 1 hook, 1 database column, 1 npm dependency and 3 source files removed. Production needs no mail credentials |
+| 8 | **`PRIVACY_POLICY_URL` removed.** It was read only by a 503 gate, was rendered nowhere and was served to nobody | The privacy link is CMS content (`site-settings.legalLinks`). A launch **content** task, not a boot guard — §5 |
+| 9 | **`CRON_SECRET` is optional in production.** `jobs.access.run` fails CLOSED without it | One fewer secret the owner must mint for no purpose |
+| 10 | **Rate limits moved from the reverse proxy into the application** | Railway provides no proxy to configure. `src/lib/rateLimit.ts` — RUNBOOK §4 |
+| 11 | **No `/payload-api` REST kill switch.** Access control already closes every private collection, and a switch would disable the Admin Panel | RUNBOOK §4.2, `tests/integration/accessControl.test.ts` |
 
 ---
 
@@ -199,8 +209,18 @@ load-bearing on its own. That is an architecture requirement, not a preference.
 | 7 | svfrontend env `NEXT_PUBLIC_MEDIA_BASE_URL` | Cloudinary delivery host — **not** a subdomain of `<domain>` unless a custom hostname is bought | Every `next/image` call site throws "hostname is not configured" |
 | 8 | **CMS → Site Settings → Brand → `url`** | `https://www.<domain>` | Currently `[SITE_URL]`. **This is admin-editable, not an env var** |
 | 9 | DNS | `www`, `cms` records + TLS certificates | — |
-| 10 | Reverse proxy | server names, HSTS, the `/payload-api/<slug>` block | — |
-| 11 | Email sending domain | SPF/DKIM/DMARC for `EMAIL_FROM_ADDRESS` (OQ-7b) | Lead notifications land in spam |
+
+> ⚠️ **Two rows were removed on 21 Sep 2026 and the count is now NINE, not
+> eleven.**
+>
+> *Row 10, "Reverse proxy — server names, HSTS, the `/payload-api/<slug>`
+> block":* **there is no reverse proxy.** Railway terminates TLS and routes
+> straight to the container. Listing work nobody can do made the checklist look
+> complete while leaving the enquiry form unprotected. The abuse limits that row
+> implied are now in the application (RUNBOOK §4.1) and the `/payload-api`
+> exposure is closed by access control (RUNBOOK §4.2).
+>
+> *Row 11, "Email sending domain — SPF/DKIM/DMARC":* **there is no email.**
 
 > Row 8 is the one that is **not** an environment variable. `site-settings.url`
 > is CMS data an administrator edits in the Admin Panel. It feeds the public
@@ -211,43 +231,129 @@ load-bearing on its own. That is an architecture requirement, not a preference.
 
 ---
 
-## 5. Privacy policy — **AWAITING OWNER · BLOCKS LAUNCH**
+## 5. Privacy policy — **AWAITING OWNER · a CONTENT task, not a code gate**
 
-**The final URL is not known and has not been invented.** No placeholder that
-could pass for a real URL has been introduced anywhere.
+> ⚠️ **REWRITTEN 21 Sep 2026.** This section previously documented a boot-time
+> environment variable that switched the enquiry endpoint off. That variable is
+> gone. What follows is the obligation that is actually real, and the two places
+> it is actually discharged.
 
-### The safeguard, which is unchanged and was not weakened
+### What the application really collects
 
-```ts
-// src/lib/env.ts
-export const leadCaptureAllowed = !isProduction || Boolean(env.PRIVACY_POLICY_URL)
-```
+**This is the whole list, and it is short on purpose.** Everything a visitor
+types into the contact form, and three things the server records about the
+request:
 
-`POST /api/v1/leads` **refuses submissions in production** while
-`PRIVACY_POLICY_URL` is unset. In development the gate is open so the endpoint
-can be built and tested. This is deliberate and is the only thing standing
-between the site and collecting name + phone with no privacy notice, which is a
-DPDP Act exposure.
+| Field | Source | Notes |
+|---|---|---|
+| `name` | typed by the visitor | required |
+| `phone` | typed by the visitor | required, stored verbatim + an E.164 copy |
+| `message` | typed by the visitor | optional |
+| `projectSlug` / `project` / `projectNameSnapshot` | chosen from a dropdown | optional |
+| `sourcePath` | `Referer`, same-origin only | which page the enquiry came from |
+| `ipAddress` | request header | **auto-purged after 90 days** |
+| `userAgent` | request header | **auto-purged after 90 days** |
 
-### The exact remaining requirement
+🔴 **THERE IS NO EMAIL ADDRESS FIELD.** The contact form does not ask for one, so
+the backend does not store one. **A privacy policy must not claim otherwise** —
+describing collection that does not happen is its own compliance problem.
 
-1. **Publish a privacy policy** at a stable, reachable URL.
-2. It must name **every sub-processor**. As of this pass that is, at minimum:
-   the email/SMTP provider (OQ-7b, still open), **Cloudinary** (media), and
-   **Neon** (database — where lead name and phone are stored).
-   *Both of the last two are new as of today and did not exist when OQ-24 was
-   first written.*
-3. Set `PRIVACY_POLICY_URL` in the backend environment.
-4. Set the matching **CMS → Site Settings → Legal → Privacy policy** link, which
-   is currently `[PRIVACY_URL]` and rendered inert by the frontend's placeholder
-   guard.
-5. Update **CMS → Site Settings → Content → `formNote`**, which still contains
-   the literal token `[LINK TO PRIVACY POLICY]` and is the consent artefact
-   rendered next to the submit button.
+### Where the data goes
 
-Steps 3, 4 and 5 are three different places and all three are required: the env
-var unlocks the endpoint, the legal link puts the policy in the footer, and the
-form note is the promise made at the point of collection.
+**Two sub-processors. That is the complete list.**
+
+| Sub-processor | What it holds |
+|---|---|
+| **Neon** (PostgreSQL) | the enquiry rows — name, phone, message, project |
+| **Cloudinary** | uploaded images and PDFs — **no enquiry data** |
+
+*The email provider left this list on 21 Sep 2026, because there is no email
+provider.* Nothing about an enquiry leaves the database.
+
+### The exact remaining requirement — 3 steps, all content
+
+1. **Publish a privacy policy** at a stable, reachable URL. It must name the two
+   sub-processors above and state the 90-day IP/user-agent retention.
+   **USER INPUT REQUIRED** — no URL has been invented anywhere in this codebase.
+2. **CMS → Site Settings → Legal → `legalLinks`** — add the label and URL. This
+   is what the frontend `Footer` renders on every page. It is currently
+   `[PRIVACY_URL]`, which the frontend's placeholder guard renders inert, so no
+   dead link ships in the meantime.
+3. **CMS → Site Settings → Content → `formNote`** — the consent sentence beside
+   the submit button, which still reads `[LINK TO PRIVACY POLICY]`. This is the
+   promise made at the point of collection, and it must stay truthful to the
+   table above.
+
+**All three are done in the Admin Panel or by the policy author. None requires a
+deploy, a code change or an environment variable.**
+
+### Why the environment variable was removed
+
+`PRIVACY_POLICY_URL` was read in exactly one place — a boolean that made
+`POST /api/v1/leads` return 503 in production. It was **never rendered, never
+served to the frontend and never linked from anything a visitor could see.**
+
+So the control it provided was illusory in both directions: setting it to any
+syntactically valid URL satisfied the gate without a policy existing, and leaving
+it unset disabled the only feature this website exists for while doing nothing
+for a visitor's privacy. A guard that can be satisfied without doing the thing,
+and whose failure mode is switching the product off, is not a guard.
+
+The obligation is real; the mechanism was not. The obligation is now tracked
+where it can actually be discharged — steps 2 and 3 above, and
+[`DEPLOYMENT-CHECKLIST.md`](./DEPLOYMENT-CHECKLIST.md) §5.
+
+---
+
+## 5b. Environment variables — the complete audit
+
+Every variable the schema declares (`src/schemas/env.ts`), classified. **18 keys,
+down from 27.**
+
+### A. Required in production — boot fails without them
+
+| Variable | Why it is required |
+|---|---|
+| `PAYLOAD_SECRET` | ≥32 chars. An empty secret yields a deterministic JWT key and a forgeable admin session |
+| `NEXT_PUBLIC_SERVER_URL` | Protocol + host only. A trailing path breaks admin links |
+| `CORS_ORIGINS` | The browser cannot submit the contact form without it |
+| `CSRF_ORIGINS` | Admin writes are rejected without it |
+| `DATABASE_URL` | — |
+| `DATABASE_SSL` | Must be `true`. Enquiry PII would otherwise cross the network in plaintext |
+| `CLOUDINARY_CLOUD_NAME` | Media on container disk is destroyed by the next deploy |
+| `CLOUDINARY_API_KEY` | — |
+| `CLOUDINARY_API_SECRET` | — |
+| `REVALIDATE_WEBHOOK_URL` | Without it, publishing appears to work and the site never updates |
+| `REVALIDATE_SECRET` | Must be byte-identical to the frontend's, or every revalidation 401s where only the job log sees it |
+
+### B. Optional
+
+| Variable | Default | When to set it |
+|---|---|---|
+| `CLOUDINARY_DELIVERY_BASE_URL` | Cloudinary's own host | Only for a private CDN distribution or custom hostname (Advanced plan+) |
+| `CRON_SECRET` | unset | Only to trigger job runs over HTTP. **Unset is the safer state** — `jobs.access.run` fails closed |
+| `ENABLE_JOB_WORKERS` | `false` | Only if the worker services are dropped for cost. `true` on two instances runs every job twice |
+| `LOG_LEVEL` | `info` | — |
+
+### C. Development / test only
+
+| Variable | Note |
+|---|---|
+| `NODE_ENV` | Set by the tooling, not by hand |
+| `PAYLOAD_SEED` | **Boot FAILS in production if set.** Its absence is the guard against seeding over live edits |
+| `DISABLE_LOGGING` | Silences pino; for test runs |
+
+### D. Removed — do not set these, nothing reads them
+
+| Variable | Why it is gone |
+|---|---|
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | No email subsystem |
+| `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | No email subsystem |
+| `SALES_NOTIFICATION_EMAIL` | No notification. The administrator reads Admin → Enquiries |
+| `PRIVACY_POLICY_URL` | Read only by a 503 gate; rendered nowhere. See §5 |
+
+⚠️ **A removed variable left set in the platform console is worse than
+harmless** — the next person assumes mail works. Delete them from Railway.
 
 ---
 
@@ -260,7 +366,12 @@ form note is the promise made at the point of collection.
 | Logo | **IMPLEMENTED** | `site-settings.logo` now actually renders. Until one is uploaded the committed emblem is used |
 | Testimonials | **AWAITING OWNER** | None seeded, none invented. Entered through Admin. The DB CHECK constraint refuses to publish one without consent |
 | `[BRACKETED]` values | **AWAITING OWNER** | OQ-22. Phone, email, WhatsApp, address, map URL, social links, site URL |
-| Rate limiting | **AWAITING INFRA** | Payload 3 ships none. Reverse-proxy configuration — `RUNBOOK.md` §4 |
+| Rate limiting | **IMPLEMENTED** | ⚠️ Was AWAITING INFRA. Moved into the application on 21 Sep 2026 because Railway has no reverse proxy to configure. `src/lib/rateLimit.ts`, `RUNBOOK.md` §4.1, 6 tests |
+| `/payload-api` exposure | **IMPLEMENTED** | ⚠️ A REST kill switch was investigated and **rejected** — it would disable the Admin Panel, and access control already closes every private collection. `RUNBOOK.md` §4.2, 15 tests |
+| Admin password recovery | **IMPLEMENTED** | Replaces the email reset link, which cannot deliver. `npm run admin:reset-password`, `RUNBOOK.md` §7 |
+| Email / SMTP | **REMOVED** | Not part of this product. See §1b decision 7 |
+| Database backups | **AWAITING INFRA** | Procedure documented at this project's scale — `RUNBOOK.md` §5.1. Neon PITR + a nightly `pg_dump` kept off-vendor |
+| Media backups | **AWAITING OWNER** | 🔴 **The one genuine durability gap.** Cloudinary is the only copy; its backup add-on is paid. 30-day recovery for a wrong delete/replace; none for account loss. `RUNBOOK.md` §5.2 |
 | Restore drill | **AWAITING INFRA** | Documented, **never rehearsed**. `RUNBOOK.md` §6 |
 | `PAYLOAD_SECRET` rotation | **AWAITING INFRA** | Documented, **never rehearsed**. `RUNBOOK.md` §7 |
 | Indexing block | **IMPLEMENTED** | Two blocks, one switch — `NEXT_PUBLIC_ALLOW_INDEXING`. Lift at launch |

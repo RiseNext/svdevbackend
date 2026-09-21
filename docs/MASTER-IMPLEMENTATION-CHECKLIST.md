@@ -38,6 +38,27 @@
 > - ✅ Frontend integrated with **zero route regressions** and First Load JS unchanged-or-smaller
 > - ❌ **NOT done:** production provisioning, the restore drill, the secret-rotation
 >   rehearsal, edge rate limiting, and the four owner deliverables that block launch
+
+> ## 🟢 UPDATE — 21 September 2026
+>
+> The summary above is a **dated record of 20 September** and is deliberately left
+> as written. Four of its lines have since been superseded:
+>
+> - **Tables: 50 → 51.** Migration 003 added `payload_jobs_stats`; migration 004
+>   dropped the `leads.notified_at` column (no table change).
+> - **Tests: 132 → 189.**
+> - **Rate limiting is DONE, and it is NOT "edge" rate limiting.** T-068 and T-124
+>   below both specify it "at the reverse proxy / CDN / WAF". **Railway provides no
+>   such layer**, so it is implemented IN THE APPLICATION
+>   (`src/lib/rateLimit.ts`): 5/min/IP and 3/hour/phone, keyed on the rightmost
+>   `X-Forwarded-For` hop, which a client cannot forge. Read every "edge rate
+>   limiting" phrase in this document as that.
+> - **Production provisioning is PARTLY done.** The real **Neon** production
+>   database exists and carries all four migrations; Railway and Vercel are still
+>   unprovisioned.
+>
+> Every **SMTP / email / `sendLeadNotification`** item anywhere below is void —
+> the product sends no email. See [`AI-CONTEXT.md`](./AI-CONTEXT.md).
 >
 > **Items below that remain genuinely unticked are the ones above marked ❌, plus
 > everything in §26 of the plan that is an owner decision.** Treat the phase

@@ -1,6 +1,28 @@
 # CONTEXT-INDEX.md — Documentation map
 
-All backend specification documents live in `svbackend/docs/`. **No backend code exists yet.**
+All backend specification documents live in `svbackend/docs/`.
+
+> 🔴 **Updated 21 Sep 2026 — READ THIS BEFORE THE TABLE BELOW.**
+>
+> The header of this file used to say "No backend code exists yet." **The backend
+> is built, tested and scoped down.** The 21 Sep production-readiness pass removed
+> the email subsystem, the `PRIVACY_POLICY_URL` gate and the reverse-proxy
+> assumption, so **a large part of this document set is now HISTORICAL.**
+>
+> **Start with [`AI-CONTEXT.md`](./AI-CONTEXT.md) §0**, which lists every place the
+> older documents disagree with the code and which one wins.
+>
+> **Current and maintained:**
+> [`DEPLOYMENT-CHECKLIST.md`](./DEPLOYMENT-CHECKLIST.md) (go-live) ·
+> [`RUNBOOK.md`](./RUNBOOK.md) (operations) ·
+> [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) (values + the env audit) ·
+> `ARCHITECTURE.md` §2 · `../README.md`.
+>
+> **Historical planning artefacts — accurate about intent at the time, not about
+> the code today:** `MASTER-IMPLEMENTATION-PLAN.md`,
+> `MASTER-IMPLEMENTATION-CHECKLIST.md`, `DOCUMENTATION-CORRECTIONS.md`,
+> `PHASE-1-GATE-REPORT.md`, `BACKEND-ROADMAP.md`, `INTEGRATIONS.md`. They are kept
+> because the reasoning is auditable; **they are not instructions.**
 
 > **Updated 20 Sep 2026.** Three documents were added by the implementation investigation. **Read `MASTER-IMPLEMENTATION-PLAN.md` before implementing anything** — it supersedes `BACKEND-ROADMAP.md` on phase structure and corrects Payload-specific assumptions across this set. Several documents below are **not yet corrected**; `DOCUMENTATION-CORRECTIONS.md` says which, and `ARCHITECTURE.md` and `SECURITY.md` carry correction banners at the top.
 
@@ -14,7 +36,8 @@ All backend specification documents live in `svbackend/docs/`. **No backend code
 | 1d | **`MASTER-IMPLEMENTATION-CHECKLIST.md`** | **While implementing** | Every task as a verifiable checkbox, phase by phase, with a Definition of Done per phase |
 | 1e | **`MIGRATION-001-DECISIONS.md`** | **Before writing `payload.config.ts` or running the first migration** | The six decisions that become expensive-to-impossible after migration 001. Five resolved on technical grounds; **one (OQ-25, multilingual) is the owner's and is still open**, with a safe default already applied |
 | 1e2 | **`PHASE-1-GATE-REPORT.md`** | **Before trusting any "NOT VERIFIED" marker** | 🟢 **What the built system actually does, measured against a real database.** The D-015 verdict, every previously-unverified Payload behaviour now resolved, and the four silent defects the gate caught |
-| 1e3 | **`RUNBOOK.md`** | **Before deploying or during an incident** | Deploy, rollback (additive vs destructive), restore drill, session revocation, secret rotation, the three day-one alarms |
+| 1e3 | **`DEPLOYMENT-CHECKLIST.md`** | **At go-live** | 🟢 **CURRENT.** The short tick-list: the four Railway services, the secrets you must supply, the enquiry-form proof, and the privacy-policy content task |
+| 1e4 | **`RUNBOOK.md`** | **Before deploying or during an incident** | 🟢 **CURRENT.** Deploy, rollback (additive vs destructive), abuse limits, backups and the restore drill, admin password recovery, secret rotation, the day-one alarms |
 | 1f | **`DOCUMENTATION-CORRECTIONS.md`** | **Before trusting any technical detail in an uncorrected document** | The 92-finding conflict audit's verified corrections — what was applied, what awaits owner review, and the dependency-ordered plan to apply the rest |
 | 2 | `PRD.md` | Before any feature work | Product vision, users, confirmed vs inferred scope |
 | 3 | `REQUIREMENTS.md` | Before implementing | Numbered functional + non-functional requirements (`FR-*`, `NFR-*`) |

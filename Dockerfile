@@ -124,10 +124,39 @@ EXPOSE 3001
 ENV PORT=3001
 ENV HOSTNAME=0.0.0.0
 
-# A readiness probe the orchestrator can use directly. /livez is deliberately
-# DB-free: a degraded database must not cause a restart loop, because restarting
-# the app does not fix Postgres.
+# READINESS, and it MUST be /healthz rather than /livez.
+#
+# 🔴 THIS USED TO PROBE /livez, AND THAT MADE THE HEALTH CHECK REPORT GREEN ON A
+# CONTAINER THAT COULD NOT SERVE A SINGLE REQUEST. Measured, not theorised:
+# built this image, ran it with NODE_ENV=production and no Cloudinary keys, and
+# the container sat at "Up (healthy)" for five minutes while /healthz,
+# /api/v1/projects and /api/v1/site-settings ALL returned 500.
+#
+# The cause is that env validation is not a boot step. `src/lib/env.ts` throws
+# "Invalid environment. Refusing to boot." — but it is reached through the
+# import graph of `payload.config.ts`, which Next loads LAZILY on the first
+# request that needs it. /livez imports none of that by design, so it answers
+# 200 forever no matter how badly the application is configured.
+#
+# The consequence on a platform that gates traffic on this signal is the worst
+# available one: a misconfigured deploy goes green, is handed live traffic, and
+# 500s every visitor — including every enquiry, which is the one thing this
+# system exists to capture. Silent and total.
+#
+# ⚠️ THE ORIGINAL /livez ARGUMENT IS STILL CORRECT, AND IS NOT BEING DISCARDED:
+# a degraded database must not cause a restart loop, because restarting the app
+# does not fix Postgres. That argument is about LIVENESS. `/livez` remains
+# exactly that and is still the right probe for a restart policy — see
+# src/app/livez/route.ts, which says so itself. Docker's HEALTHCHECK is the
+# READINESS signal, it does not restart anything on its own, and readiness is
+# precisely the thing that SHOULD go red when the process cannot serve.
+#
+# /healthz fails for both causes that matter: a config that cannot load (500)
+# and a database that cannot be reached (503).
+#
+# 🔶 RAILWAY DOES NOT READ THIS DIRECTIVE. Set the service's health check path
+# to `/healthz` in the Railway dashboard as well — see docs/DEPLOYMENT-CHECKLIST.md.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3001/livez || exit 1
+  CMD wget -qO- http://127.0.0.1:3001/healthz || exit 1
 
 CMD ["node", "server.js"]

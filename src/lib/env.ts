@@ -34,15 +34,6 @@ const parsed = envSchema.safeParse({
   CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || undefined,
   CLOUDINARY_DELIVERY_BASE_URL: process.env.CLOUDINARY_DELIVERY_BASE_URL || undefined,
 
-  SMTP_HOST: process.env.SMTP_HOST || undefined,
-  SMTP_PORT: process.env.SMTP_PORT || undefined,
-  SMTP_SECURE: process.env.SMTP_SECURE,
-  SMTP_USER: process.env.SMTP_USER || undefined,
-  SMTP_PASS: process.env.SMTP_PASS || undefined,
-  EMAIL_FROM_ADDRESS: process.env.EMAIL_FROM_ADDRESS,
-  EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME,
-  SALES_NOTIFICATION_EMAIL: process.env.SALES_NOTIFICATION_EMAIL || undefined,
-
   CRON_SECRET: process.env.CRON_SECRET || undefined,
   ENABLE_JOB_WORKERS: process.env.ENABLE_JOB_WORKERS,
   REVALIDATE_WEBHOOK_URL: process.env.REVALIDATE_WEBHOOK_URL || undefined,
@@ -51,8 +42,6 @@ const parsed = envSchema.safeParse({
   LOG_LEVEL: process.env.LOG_LEVEL,
   DISABLE_LOGGING: process.env.DISABLE_LOGGING,
   PAYLOAD_SEED: process.env.PAYLOAD_SEED,
-
-  PRIVACY_POLICY_URL: process.env.PRIVACY_POLICY_URL || undefined,
 })
 
 if (!parsed.success) {
@@ -68,10 +57,3 @@ export const env: Readonly<Env> = Object.freeze(parsed.data)
 
 export const isProduction = env.NODE_ENV === 'production'
 export const isTest = env.NODE_ENV === 'test'
-
-/**
- * OQ-24 gate. `POST /api/v1/leads` must not accept submissions in production
- * until a reachable privacy URL is configured. In development the gate is open
- * so the endpoint can be built and tested.
- */
-export const leadCaptureAllowed = !isProduction || Boolean(env.PRIVACY_POLICY_URL)

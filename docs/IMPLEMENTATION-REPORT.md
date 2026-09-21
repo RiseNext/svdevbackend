@@ -23,8 +23,9 @@
 | | |
 |---|---|
 | D-015 validation gate | ✅ **PASSED** — Directus fallback NOT triggered. [`PHASE-1-GATE-REPORT.md`](./PHASE-1-GATE-REPORT.md) |
-| Backend | ✅ Built. 9 collections + 1 global, 50 tables, 7 public endpoints, 2 probes |
-| Tests | ✅ **132 passing** (unit · config/access · domain integration · jobs/scheduling) |
+| Backend | ✅ Built. 9 collections + 1 global, **51 tables**, 7 public endpoints, 2 probes |
+| Tests | ✅ **189 passing** (unit · config/access · domain integration · jobs/scheduling · enquiry · access control) |
+| Production database | ✅ **Real Neon database migrated and verified 21 Sep 2026** — 4 migrations, 51 tables, `leads.notified_at` absent, no business data |
 | Typecheck | ✅ Clean in **both** repositories |
 | Production build | ✅ Passes, standalone output emitted |
 | Migrations | ✅ 001 + 002, reversibility proven **up → down → up** |
@@ -52,10 +53,18 @@ Visitor ─► CDN (static HTML) ────────────── svfr
            ├── /healthz /livez
            └── payload-jobs → 2 supervised worker containers
                 ▼
-         PostgreSQL 15 (50 tables) · S3-compatible storage · SMTP
+         Neon PostgreSQL (51 tables) · Cloudinary media
 ```
 
-Four trust boundaries: the edge (rate limiting — Payload ships none), `publicFind()` (`overrideAccess: false` + `user: undefined` + hard-coded published-only `where`), per-collection access functions, and the private network.
+> ⚠️ **CORRECTED 21 Sep 2026.** This diagram previously ended
+> `PostgreSQL 15 (50 tables) · S3-compatible storage · SMTP`. All three were
+> wrong by the time the system was finished: storage is **Cloudinary** (D-123),
+> production Postgres is **Neon** (D-124), and **there is no SMTP at all** — the
+> email subsystem was removed outright, so an enquiry is delivered by being
+> written to Postgres and read in Admin → Enquiries. Migration 004 took the last
+> trace of it (`leads.notified_at`) with it, bringing the table count to 51.
+
+Four trust boundaries: **in-application rate limiting** (`src/lib/rateLimit.ts` — Payload ships none, and Railway provides no edge at which to write one, so it lives in the request path), `publicFind()` (`overrideAccess: false` + `user: undefined` + hard-coded published-only `where`), per-collection access functions, and the private network.
 
 ---
 
@@ -154,13 +163,42 @@ leaked keys: NONE
 
 ---
 
-## 13–16. Leads, jobs, email, Tier-2, globals
+## 13–16. Enquiries, jobs, Tier-2, globals
 
-**Leads** — all verified end to end: valid 201, source spoofing stored as `contact_form`, 422 with `details[].field` matching the form inputs, 415 on wrong content type, `UNKNOWN_PROJECT`, unknown property rejected, honeypot returning a byte-identical 201 with **0 rows stored**, dedupe returning 201 with still 1 row.
+> ⚠️ **UPDATED 21 Sep 2026 (production-readiness pass).** The email subsystem
+> described in the original version of this section no longer exists. See
+> `AI-CONTEXT.md` §0 for the full scope correction.
 
-**Jobs** — 5 tasks, 2 queues, worker containers, watchdog with a 15-minute re-queue and second-channel alerting. Verified: 2 leads queued → worker ran → both `notifiedAt` stamped.
+**Enquiries** — verified end to end, and now **covered by 37 tests that call the
+route handler itself** (`tests/integration/enquiry.test.ts`), which no test did
+before: valid 201 **with the row asserted present in the database**, source
+spoofing stored as `contact_form`, 422 with every `details[].field` matching an
+input the form actually renders, 415 on wrong content type, 413 on an oversized
+body, `UNKNOWN_PROJECT` for both a missing and an *unpublished* project (same
+message, so unpublished projects cannot be enumerated), unknown property
+rejected, honeypot returning a byte-identical 201 with **0 rows stored**, dedupe
+returning 201 with the row count unchanged, `Idempotency-Key` replaying the
+original 201 verbatim, and a Telugu name accepted.
 
-**Email** — `nodemailerAdapter`; ethereal in dev (verified, prints preview credentials), SMTP in production behind a **boot guard** that refuses to start without `SMTP_HOST` and `SALES_NOTIFICATION_EMAIL`.
+**Jobs** — **4** tasks (was 5), 2 queues, worker services, watchdog with a
+15-minute re-queue. 🔴 **None of them touches an enquiry.** The test that used to
+assert "creating a lead queues `sendLeadNotification`" now asserts the stronger
+inverse: creating a lead queues **nothing at all**, so no background process sits
+between the visitor and the administrator seeing the enquiry.
+
+**Email — REMOVED.** `@payloadcms/email-nodemailer`, the `email` config key,
+`sendLeadNotification`, `enqueueLeadNotification`, the `leads.notifiedAt` column
+(migration 004) and `src/email/` are all gone, along with 8 environment
+variables. Storing the row **is** the delivery. This also removed a liability
+nobody had noticed: with SMTP unset, `nodemailerAdapter()` provisioned an
+**ethereal.email test account over the network on every boot** — every migrate,
+every worker start, every test run. Payload's own `consoleEmailAdapter` fallback
+does not.
+
+**Rate limiting — ADDED** (`src/lib/rateLimit.ts`, ~40 lines). 5/min/IP and
+3/hour/phone on the enquiry endpoint, keyed on the **rightmost** `X-Forwarded-For`
+hop because the leftmost is client-supplied. Previously deferred to a reverse
+proxy the real deployment does not have.
 
 **Tier-2** — testimonials (three-layer consent gate), faqs, statistics. Deliberately **not seeded**: the three existing quotes are invented placeholders.
 
@@ -221,7 +259,27 @@ The Trash docs say *"When deleting a document from the main collection **List Vi
 
 ## 23. Environment variables
 
-29 backend variables, CI-checked against `.env.example`. Required in production and boot-guarded: `PAYLOAD_SECRET` (≥32 chars), `DATABASE_URL`, `DATABASE_SSL`, `S3_*`, `CDN_BASE_URL`, `SMTP_*`, `SALES_NOTIFICATION_EMAIL`, `CRON_SECRET`, `REVALIDATE_*`, `PRIVACY_POLICY_URL`. Frontend adds 4.
+**18 backend variables** (was 29), CI-checked against `.env.example` by
+`npm run check:drift`. Frontend adds 4.
+
+**Required in production, boot-guarded — 11:** `PAYLOAD_SECRET` (≥32 chars),
+`NEXT_PUBLIC_SERVER_URL`, `CORS_ORIGINS`, `CSRF_ORIGINS`, `DATABASE_URL`,
+`DATABASE_SSL`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`,
+`CLOUDINARY_API_SECRET`, `REVALIDATE_WEBHOOK_URL`, `REVALIDATE_SECRET`.
+
+**Removed 21 Sep 2026 — 9:** `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`,
+`SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`,
+`SALES_NOTIFICATION_EMAIL` (no email subsystem) and `PRIVACY_POLICY_URL` (read
+only by a 503 gate; rendered nowhere).
+
+**Demoted from required to optional — 1:** `CRON_SECRET`. It guards only
+HTTP-triggered job runs and `jobs.access.run` **fails closed** without it, so
+absence is the safer state. Requiring it forced the owner to mint a secret whose
+only effect was to open a door nothing uses.
+
+Full classification — required / optional / dev-only / removed —
+[`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §5b. A test pins the
+production-required set so it cannot grow by habit.
 
 **No `SKIP_ENV_VALIDATION` escape hatch exists, and none may be added** — it would be set in production the first time a deploy was urgent.
 
@@ -236,7 +294,7 @@ PAYLOAD_SEED=true npm run seed                     # prints admin passwords once
 # Tests
 docker compose -f docker-compose.test.yml up -d
 DATABASE_URL=postgres://postgres:test@localhost:5433/sv_test npm run migrate
-npm test                                           # 132 tests
+npm test                                           # 183 tests
 npm run check:drift && npm run typecheck
 
 # Frontend
@@ -252,14 +310,16 @@ Not invented, not defaulted, not inferred.
 
 | # | Decision | Blocks |
 |---|---|---|
-| **OQ-24** | **Privacy policy** — author, content, URL. `POST /api/v1/leads` **refuses submissions in production** until `PRIVACY_POLICY_URL` is set | 🔴 The form going live. The largest compliance gap (DPDP) |
+| **OQ-24** | **Privacy policy** — author, content, URL. ⚠️ **RESCOPED 21 Sep 2026.** It no longer blocks the endpoint in code: `PRIVACY_POLICY_URL` was removed because it was rendered nowhere and served to nobody, so it proved nothing while switching the form off. The obligation is real and is discharged as **CMS content** — `site-settings.legalLinks` + `formNote` | Launch, as a **content** task. `DEPLOYMENT-CHECKLIST.md` §5 |
 | **OQ-6** | Company name: "SV Developers" (repo) vs "SRR Developers Pvt. Ltd." (brief + live site) | Launch. `name` and `legalName` are distinct fields so the change is one admin edit |
 | **OQ-22** | Every `[BRACKETED]` value — phone, email, WhatsApp, address, domain, approval numbers, RERA registration, statistics, drive times | Launch + indexing. Several carry legal weight |
 | **OQ-23** | Real consented testimonials, or delete the section | Launch. Currently ships empty, which is correct |
-| **OQ-2** | The literal sales notification address | Production boot (guarded) |
-| **OQ-7** | Storage and email providers, accounts, credential ownership | Production. Both are env vars; no code changes |
+| **OQ-2** | ~~The literal sales notification address~~ | ✅ **CLOSED by removal.** There is no notification — the administrator reads Admin → Enquiries |
+| **OQ-7a** | Storage provider, account, credential ownership | Production. Env vars only; no code changes |
+| **OQ-7b** | ~~Email provider~~ | ✅ **CLOSED by removal.** There is no email |
 | **OQ-1** | Do leads go to a CRM? | Nothing — additive later |
 | **OQ-3** | Is the lead status pipeline real? | Nothing — `leadStatus` deliberately **not built** |
+| — | **Media durability.** Cloudinary is the only copy of uploaded images and PDFs; its backup add-on is paid. 30-day recovery for a wrong delete/replace, none for account loss | Nothing today. The free mitigation is keeping the original photography — `RUNBOOK.md` §5.2 |
 | **OQ-18** | Brochures public or lead-gated? | A one-collection config change |
 | — | **Lead record retention lifetime** — undefined in every source document | DPDP compliance |
 | — | **Project photography** — a stated launch blocker with no owner, and it gates removing `dangerouslyAllowSVG` | Launch quality |

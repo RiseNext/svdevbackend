@@ -40,9 +40,12 @@ const redact = {
     '*.userAgent',
     'PAYLOAD_SECRET',
     'DATABASE_URL',
-    '*.accessKeyId',
-    '*.secretAccessKey',
-    '*.SMTP_PASS',
+    'CRON_SECRET',
+    'REVALIDATE_SECRET',
+    '*.api_secret',
+    '*.CLOUDINARY_API_SECRET',
+    // `*.SMTP_PASS` was removed with the email subsystem — there is no such
+    // variable to leak.
   ],
   censor: '[redacted]',
 }

@@ -134,7 +134,6 @@ export const enum_payload_jobs_log_task_slug = pgEnum(
   "enum_payload_jobs_log_task_slug",
   [
     "inline",
-    "sendLeadNotification",
     "revalidatePaths",
     "purgeLeadPii",
     "sweepDeletedMedia",
@@ -149,7 +148,6 @@ export const enum_payload_jobs_task_slug = pgEnum(
   "enum_payload_jobs_task_slug",
   [
     "inline",
-    "sendLeadNotification",
     "revalidatePaths",
     "purgeLeadPii",
     "sweepDeletedMedia",
@@ -927,11 +925,6 @@ export const leads = pgTable(
     message: varchar("message"),
     source: enum_lead_source("source").notNull().default("contact_form"),
     sourcePath: varchar("source_path"),
-    notifiedAt: timestamp("notified_at", {
-      mode: "string",
-      withTimezone: true,
-      precision: 3,
-    }),
     consentGiven: boolean("consent_given").notNull().default(true),
     isRead: boolean("is_read").default(false),
     ipAddress: varchar("ip_address"),
