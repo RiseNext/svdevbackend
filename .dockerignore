@@ -1,0 +1,60 @@
+# =============================================================================
+# Build-context exclusions.
+#
+# 🔴 WHY THIS FILE IS NOT COSMETIC. The builder stage does:
+#
+#     COPY --from=deps /app/node_modules ./node_modules
+#     COPY . .
+#
+# `COPY . .` runs SECOND, so without this file a developer's local
+# `node_modules` is overlaid on top of the one `npm ci` just built inside
+# Alpine. The result is a MERGED tree — a verification build made on Windows
+# produced an image containing BOTH `@img/sharp-win32-x64` and
+# `@img/sharp-linuxmusl-x64`. The platform binaries that `npm ci` resolved are
+# silently mixed with foreign ones, and the image stops being a function of the
+# lockfile.
+#
+# Railway builds from the git repository, where none of these paths exist, so
+# this file is what makes a LOCAL build reproduce the Railway build rather than
+# quietly diverging from it.
+#
+# ⚠️ `.env.ci*` must NOT be excluded — the Dockerfile copies it as the
+# build-time dummy environment (see Dockerfile, BUILD_ENV_FILE).
+# =============================================================================
+
+# --- Dependencies and build output: rebuilt inside the image ----------------
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# --- Real environment files: NEVER into a build layer -----------------------
+# `.env.example`, `.env.ci.example` and `.env.test` are dummy-only and stay.
+.env
+.env.local
+.env.production
+.env.ci
+
+# --- VCS / editor / OS ------------------------------------------------------
+.git/
+.gitignore
+.gitattributes
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Local runtime artefacts ------------------------------------------------
+media/
+documents/
+.tmp/
+coverage/
+.vitest/
+*.log
+npm-debug.log*
+
+# --- Not needed to build or run ---------------------------------------------
+docs/
+docker-compose*.yml

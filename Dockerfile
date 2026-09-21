@@ -74,9 +74,30 @@ RUN mkdir .next && chown nextjs:nodejs .next
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# The migrations and the CLI are needed by the pre-deploy migrate job and by the
-# jobs workers, which run from this same image.
-COPY --from=builder --chown=nextjs:nodejs /app/src/migrations ./src/migrations
+# ---------------------------------------------------------------------------
+# 🔴 THE WHOLE `src` TREE, NOT JUST `src/migrations` — AND `tsconfig.json`.
+#
+# `node server.js` needs none of this: `next build` compiles the config into
+# .next/standalone. But THREE other things run from this same image and they all
+# go through the PAYLOAD CLI, which loads the TypeScript config from source:
+#
+#   · the pre-deploy migrate job   -> npm run migrate  (sets
+#     PAYLOAD_CONFIG_PATH=src/payload.config.ts)
+#   · worker-default               -> npx payload jobs:run --queue default
+#   · worker-maintenance           -> npx payload jobs:run --handle-schedules
+#   · and RUNBOOK.md §1 step 9     -> npm run seed  (needs src/seed + its assets)
+#
+# `.next/standalone` contains ONLY node_modules, package.json and server.js —
+# verified, not assumed — so copying `src/migrations` alone left the image with
+# no `src/payload.config.ts`. Every CLI invocation above then fails with a
+# config-not-found error, which is invisible until the migrate job or a worker
+# actually starts.
+#
+# `tsconfig.json` is required too: the config resolves `@/*` -> `./src/*` and
+# `@payload-config` -> `./src/payload.config.ts` through its `paths` map.
+# ---------------------------------------------------------------------------
+COPY --from=builder --chown=nextjs:nodejs /app/src ./src
+COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
 
