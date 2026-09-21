@@ -29,6 +29,12 @@ next-env.d.ts
 /media/
 /documents/
 
+# `upload.useTempFiles: true` streams every uploaded file through
+# `tempFileDir` (payload.config.ts -> ../.tmp/uploads) before the guard runs.
+# Those are RAW UPLOADED BYTES — client photography and brochures — so this
+# directory must never be committable.
+/.tmp/
+
 # --- Test / coverage -------------------------------------------------------
 coverage/
 .vitest/

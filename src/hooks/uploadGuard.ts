@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readFile, rm } from 'node:fs/promises'
 
 import {
   APIError,
@@ -57,13 +58,90 @@ export type UploadGuardContext = {
   height?: number
 }
 
+/**
+ * 🔴 THE TWO SHAPES AN UPLOADED FILE ARRIVES IN — AND WHY THIS EXISTS.
+ *
+ * MEASURED, NOT ASSUMED. `upload.useTempFiles: true` is a DELIBERATE preventive
+ * control (MASTER-IMPLEMENTATION-PLAN.md §5621: "so large files are not buffered
+ * in RAM"). Its consequence is documented in Payload's own source —
+ * `uploads/generateFileData.js:39`: *"A file uploaded with `useTempFiles`
+ * enabled arrives as a temp file path instead of"* an in-memory buffer. In that
+ * mode `file.data` IS AN EMPTY BUFFER and the bytes live at `file.tempFilePath`.
+ *
+ * Payload handles both shapes itself, and this is its exact test —
+ * `uploads/checkFileRestrictions.js:249`:
+ *   `const isTempFile = !!tempFilePath && (!file.data || file.data.length === 0)`
+ *
+ * Reading only `file.data` therefore made EVERY HTTP upload fail with "That
+ * file is empty." — the admin panel, the REST API, bulk upload, all of it — and
+ * because the throw happens on the FIRST line of the guard it also meant the
+ * SVG rejection, the declared-vs-actual MIME check, the size ceiling and the
+ * decompression-bomb guard were UNREACHABLE and had never once executed on a
+ * real upload. Nothing caught it: there is no test that posts a real multipart
+ * body, and the seed uses the Local API, which supplies `data` directly.
+ */
+const readUploadBytes = async (file: {
+  data?: unknown
+  tempFilePath?: unknown
+}): Promise<Buffer> => {
+  if (Buffer.isBuffer(file.data) && file.data.byteLength > 0) return file.data
+  if (typeof file.tempFilePath === 'string' && file.tempFilePath !== '') {
+    return readFile(file.tempFilePath)
+  }
+  return Buffer.alloc(0)
+}
+
+/**
+ * Hands the SANITISED bytes to Payload as an in-memory buffer, and RETIRES the
+ * temp file so nothing downstream can read the original bytes back.
+ *
+ * 🔴 WHY THE TEMP FILE MUST BE DISOWNED AND NOT JUST OVERWRITTEN.
+ * Downstream, Payload PREFERS the temp path wherever it is set —
+ * `generateFileData.js:147` builds its sharp pipeline from
+ * `sharp(file.tempFilePath, …)`. Setting `file.data` alone would therefore leave
+ * the ORIGINAL, EXIF-BEARING bytes on disk for Payload to pick up, silently
+ * discarding the metadata strip and the re-encode. Clearing `tempFilePath`
+ * makes every one of those `if (file.tempFilePath)` branches fall through to
+ * `file.data`, which is the shape this guard was written against.
+ *
+ * ⚠️ WRITING BACK TO THE TEMP PATH WAS TRIED FIRST AND REJECTED ON EVIDENCE.
+ * `fs.writeFile(tempFilePath, out)` is Payload's own post-crop pattern
+ * (`generateFileData.js:279`), but on Windows it left the descriptor contended:
+ * WebP uploads failed 3/3 with `UNKNOWN: unknown error, open` at
+ * `generateFileData.js:319` followed by `EBUSY … unlink`, surfacing as
+ * "There was a problem while uploading the file.", while PNG/JPEG/AVIF passed
+ * 3/3. Buffer hand-off has no such race on any platform.
+ *
+ * 🔴 THE MEMORY CONTROL IS NOT WEAKENED. `useTempFiles: true` exists "so large
+ * files are not buffered in RAM" (MASTER-IMPLEMENTATION-PLAN.md §5621). This
+ * path runs ONLY for images, which are capped at MAX_IMAGE_BYTES (10 MB) and
+ * whose re-encoded bytes are ALREADY in memory as `out` — there is nothing left
+ * to save. The 25 MB `documents`/PDF path returns earlier and never calls this,
+ * so it keeps streaming from disk untouched, which is precisely the case the
+ * control was written for.
+ */
+const adoptSanitisedBytes = async (
+  file: { data?: unknown; size?: unknown; tempFilePath?: unknown },
+  out: Buffer,
+): Promise<void> => {
+  const temp = typeof file.tempFilePath === 'string' ? file.tempFilePath : ''
+  file.data = out
+  file.size = out.byteLength
+  file.tempFilePath = undefined
+  if (temp) {
+    // Best-effort: Payload will no longer clean this up now that the path is
+    // cleared, and a stale temp file is a disk leak, not a correctness problem.
+    await rm(temp, { force: true }).catch(() => undefined)
+  }
+}
+
 const makeGuard = (kind: GuardKind): CollectionBeforeOperationHook => {
   return async ({ req, operation, context }) => {
     if (operation !== 'create' && operation !== 'update') return
     const file = req.file
     if (!file) return
 
-    const buf = file.data as Buffer
+    const buf = await readUploadBytes(file)
     if (!Buffer.isBuffer(buf) || buf.byteLength === 0) {
       throw new APIError('That file is empty.', 400)
     }
@@ -207,8 +285,9 @@ const makeGuard = (kind: GuardKind): CollectionBeforeOperationHook => {
     ctx.width = finalMeta.width ?? meta.width
     ctx.height = finalMeta.height ?? meta.height
 
-    req.file!.data = out
-    req.file!.size = out.byteLength
+    // Writes `out` to `data` AND back to `tempFilePath`, so the EXIF strip and
+    // the re-encode survive whichever representation Payload reads next.
+    await adoptSanitisedBytes(req.file!, out)
     req.file!.mimetype = sniffed.mime
     req.file!.name = `${randomUUID()}.${ext}`
   }

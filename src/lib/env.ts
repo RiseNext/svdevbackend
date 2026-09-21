@@ -57,3 +57,59 @@ export const env: Readonly<Env> = Object.freeze(parsed.data)
 
 export const isProduction = env.NODE_ENV === 'production'
 export const isTest = env.NODE_ENV === 'test'
+
+/**
+ * 🔴 THE CSRF / ADMIN-WRITE TRIPWIRE.
+ *
+ * MEASURED, NOT ASSUMED. Payload's CSRF protection only honours a cookie-borne
+ * session when the request's `Origin` appears in `config.csrf`. When it does
+ * not, Payload does not reject the request outright — it DROPS `req.user`, so
+ * every `access` function sees an anonymous caller. The observable result is a
+ * `403 "You are not allowed to perform this action."` on SAVE while the form
+ * still loads perfectly, because `site-settings.read` is `anyone`.
+ *
+ * Reproduced against this config: identical authenticated request, only the
+ * `Origin` header varied — in `CSRF_ORIGINS` -> 200; absent or foreign -> 403.
+ *
+ * This is the single most expensive misconfiguration in the deployment because
+ * it is SILENT and TOTAL: it blocks every admin write in the system (globals,
+ * projects, media uploads), while login, navigation and every read look healthy,
+ * and nothing in the server log explains it.
+ * `docs/PRODUCTION-CONFIG.md` §4 row 3 already specifies the correct value —
+ * `CSRF_ORIGINS` must contain the ADMIN PANEL's OWN origin, i.e. the backend's
+ * public URL, NOT the public website's.
+ *
+ * Deliberately a WARNING and not a boot failure: refusing to boot would convert
+ * a bad env var into a total outage of a CMS whose public site is statically
+ * served and entirely unaffected. The warning is emitted via `console.warn`
+ * rather than the pino logger because this module is imported BEFORE the logger
+ * is constructed (RULE 2 above) and must not create an import cycle.
+ */
+{
+  const serverOrigin = (() => {
+    try {
+      return new URL(env.NEXT_PUBLIC_SERVER_URL).origin
+    } catch {
+      return undefined
+    }
+  })()
+
+  const allowed = env.CSRF_ORIGINS.map((o) => {
+    try {
+      return new URL(o).origin
+    } catch {
+      return o
+    }
+  })
+
+  if (serverOrigin && !allowed.includes(serverOrigin)) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[env] ⚠️  CSRF_ORIGINS does not contain the Admin Panel's own origin (${serverOrigin}). ` +
+        'Payload silently drops the admin session on cookie-authenticated WRITES from an ' +
+        'origin it does not recognise, so EVERY admin save will fail with ' +
+        '"You are not allowed to perform this action." while reads keep working. ' +
+        'See docs/PRODUCTION-CONFIG.md §4 row 3.',
+    )
+  }
+}

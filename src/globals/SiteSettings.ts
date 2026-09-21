@@ -243,7 +243,13 @@ export const SiteSettings: GlobalConfig = {
               maxRows: MAX_ARRAY_ROWS,
               validate: uniqueByKey('text', 'ticker line'),
               admin: {
-                initCollapsed: true,
+                // FALSE — the same defect fixed on the six `projects` arrays.
+                // `ADD_ROW` creates a row with no `collapsed` flag, so
+                // `isRowCollapsed()` falls back to `initCollapsed` whenever no
+                // collapse preference exists yet, and a freshly added row
+                // arrives COLLAPSED with its Icon and Text inputs hidden.
+                // `social` above already used `false`; this was the outlier.
+                initCollapsed: false,
                 description:
                   'The scrolling claims under the homepage headline. Each line must be unique.',
               },

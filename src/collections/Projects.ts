@@ -239,6 +239,22 @@ export const Projects: CollectionConfig = {
               admin: {
                 description:
                   'One entry per paragraph. Order is meaningful. Each paragraph must be unique — the website uses the text itself as a rendering key.',
+                // 🔴 ADMIN-ONLY OVERRIDE, ZERO SCHEMA IMPACT.
+                // Payload renders `text` + `hasMany` as a CREATABLE REACT-SELECT
+                // (`@payloadcms/ui` Text/Input.js branches on `hasMany`), whose
+                // placeholder is the `general:selectValue` translation — the
+                // literal "Select a value". Typed text is only committed as a
+                // chip on Enter; clicking away DISCARDS it and re-shows the
+                // placeholder, which is exactly the reported "my paragraph
+                // became 'Select a value'". It is also the wrong control for a
+                // 5000-character paragraph.
+                //
+                // The FIELD TYPE IS DELIBERATELY UNCHANGED — it is the only
+                // shape that keeps `description: readonly string[]` an identity
+                // serialise. This swaps the control, not the data.
+                components: {
+                  Field: '@/components/admin/ParagraphsField#ParagraphsField',
+                },
               },
               // Does two things no Payload built-in does: PER-ENTRY length and
               // non-emptiness (whether minLength/maxLength apply per entry or to
@@ -302,7 +318,11 @@ export const Projects: CollectionConfig = {
               dbName: 'proj_stats',
               maxRows: MAX_ARRAY_ROWS,
               admin: {
-                initCollapsed: true,
+                // FALSE — see the note in src/fields/featureItemFields.ts. A
+                // newly added row inherits `initCollapsed` when no collapse
+                // preference exists yet, which is why "Add Stat" produced a row
+                // showing only "Item 01" with its Label and Value inputs hidden.
+                initCollapsed: false,
                 description:
                   'The four-up figure strip. The grid is exactly four columns — use four, or none. Values are TEXT, exactly as printed ("6 Acres 22.50 Guntas", "DTCP & RERA", "100%").',
                 components: { RowLabel: '@/components/admin/StatRowLabel#StatRowLabel' },
@@ -362,7 +382,8 @@ export const Projects: CollectionConfig = {
               dbName: 'proj_proximity',
               maxRows: MAX_ARRAY_ROWS,
               admin: {
-                initCollapsed: true,
+                // FALSE — see the note in src/fields/featureItemFields.ts.
+                initCollapsed: false,
                 description:
                   '⚖️ Only enter distances PRINTED ON THE BROCHURE. An unmeasured proximity claim is the one most likely to be challenged on a land page.',
                 components: { RowLabel: '@/components/admin/ProximityRowLabel#ProximityRowLabel' },

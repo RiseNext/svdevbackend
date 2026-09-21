@@ -84,7 +84,19 @@ export const featureArray = (args: {
     fields: featureItemFields(),
     validate: uniqueByKey('title', 'title'),
     admin: {
-      initCollapsed: true,
+      // 🔴 FALSE, DELIBERATELY — this is the "Add Highlight makes a blank row"
+      // bug. `ADD_ROW` in Payload's field reducer creates the row WITHOUT a
+      // `collapsed` flag; `isRowCollapsed()` then falls through to
+      // `field.admin.initCollapsed` whenever the editor has no saved collapse
+      // preference for this array yet — which is ALWAYS the case on a brand-new
+      // Create form. So `true` meant every freshly added row came back
+      // COLLAPSED, showing only "Item 01" and hiding all of its inputs.
+      //
+      // The row label components still earn their keep on a SAVED document with
+      // many rows; the editor can collapse rows themselves, and that preference
+      // is remembered. What must not happen is a row arriving collapsed at the
+      // moment it is created, because there is nothing in it to label yet.
+      initCollapsed: false,
       components: {
         RowLabel: '@/components/admin/FeatureRowLabel#FeatureRowLabel',
       },
