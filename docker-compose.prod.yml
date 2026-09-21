@@ -65,6 +65,20 @@ services:
   # their own. Duplicate `sendLeadNotification` jobs mean the sales team gets
   # the same lead three times.
   #
+  # WHO DRAINS WHAT (all five tasks are accounted for — RUNBOOK.md §4b):
+  #   worker-default      queue `default`     sendLeadNotification, revalidatePaths
+  #                                           — queued by hooks, event-driven
+  #   worker-maintenance  queue `maintenance` purgeLeadPii (daily 21:45 UTC),
+  #                                           sweepDeletedMedia (daily 22:15 UTC),
+  #                                           watchdogFailedJobs (every 15 min)
+  #                                           — queued by `schedule`, which ONLY
+  #                                           `--handle-schedules` turns into jobs
+  #
+  # 🔴 worker-maintenance IS NOT OPTIONAL as of migration 003. Without it the
+  # PII purge, the media sweep and the DEAD-LETTER WATCHDOG never run, and the
+  # watchdog is the only thing that notices a lead notification that exhausted
+  # its retries during an SMTP outage.
+  #
   # ⚠️ BOTH MUST BE RESTARTED AFTER EVERY DEPLOY, or they keep running the old
   # code against the new schema.
   # ---------------------------------------------------------------------------

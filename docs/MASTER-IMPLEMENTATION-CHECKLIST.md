@@ -30,7 +30,7 @@
 >
 > - ✅ 9 collections + 1 global · **50 physical Postgres tables** (predicted 40–60)
 > - ✅ Migrations 001 + 002, reversibility proven **up → down → up** on a clean database
-> - ✅ **103 passing tests** (unit, config/access, domain integration)
+> - ✅ **132 passing tests** (unit, config/access, domain integration, jobs/scheduling)
 > - ✅ Production build passes; typecheck clean in **both** repositories
 > - ✅ Public API: 7 routes + 2 probes, contract-verified against the thin and fat records
 > - ✅ Security negatives proven: draft leak **404 not 403**, no public route returns lead

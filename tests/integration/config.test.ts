@@ -56,12 +56,64 @@ describe('access control is EXPLICIT on 100% of collections', () => {
     expect(typeof users.access?.unlock).toBe('function')
   })
 
-  it('every global declares read, update and readVersions', () => {
+  it('every global declares read and update', () => {
+    // Applies to Payload-injected globals too — `payload-jobs-stats` is pushed
+    // into config.globals by sanitize() as soon as any task has a `schedule`,
+    // and it must still resolve to a function rather than to nothing.
     for (const global of resolved.globals) {
       expect(typeof global.access?.read, `${global.slug}.access.read`).toBe('function')
       expect(typeof global.access?.update, `${global.slug}.access.update`).toBe('function')
-      expect(typeof global.access?.readVersions, `${global.slug}.readVersions`).toBe('function')
     }
+  })
+
+  it('every VERSIONED global declares readVersions', () => {
+    // Mirrors the collection rule above. `readVersions` is only meaningful
+    // where versions exist; requiring it unconditionally asserted something
+    // that cannot be true of a global with no version history.
+    for (const global of resolved.globals) {
+      if (!global.versions) continue
+      expect(
+        typeof global.access?.readVersions,
+        `${global.slug} has versions but no readVersions access`,
+      ).toBe('function')
+    }
+  })
+
+  it('site-settings — OUR global — declares all three', () => {
+    // The conditional rule above must not become a loophole for the one global
+    // we actually own and that actually has versions.
+    const siteSettings = resolved.globals.find((g) => g.slug === 'site-settings')!
+    expect(typeof siteSettings.access?.read).toBe('function')
+    expect(typeof siteSettings.access?.update).toBe('function')
+    expect(typeof siteSettings.access?.readVersions).toBe('function')
+  })
+
+  it('the Payload-injected jobs-stats global is hidden and unversioned', () => {
+    /**
+     * 🔶 EXPOSURE RECORDED RATHER THAN SKIPPED.
+     *
+     * `payload-jobs-stats` arrives from Payload's own sanitize step, not from
+     * our config, so we cannot give it an explicit access block — the jobs
+     * config exposes `jobsCollectionOverrides` but no equivalent for this
+     * global. It therefore carries Payload's DEFAULT access, `Boolean(user)`:
+     * any authenticated user may read and update it.
+     *
+     * Bounded by three facts, which this test pins so they cannot drift:
+     * it is hidden from the Admin UI, it holds only scheduling timestamps
+     * (no PII, no content), and there is exactly one role. If a second
+     * auth-enabled collection or a non-admin role is ever added, revisit this.
+     */
+    const stats = resolved.globals.find((g) => g.slug === 'payload-jobs-stats')
+    expect(stats, 'jobs-stats global missing — schedules would fail at runtime').toBeDefined()
+    expect((stats!.admin as { hidden?: boolean } | undefined)?.hidden).toBe(true)
+    expect(stats!.versions).toBeFalsy()
+    // Exactly one authored field (`stats`) plus Payload's own timestamps —
+    // no PII and no content can reach this table.
+    expect(stats!.fields.map((f) => (f as { name?: string }).name)).toEqual([
+      'stats',
+      'updatedAt',
+      'createdAt',
+    ])
   })
 })
 

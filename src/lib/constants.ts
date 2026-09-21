@@ -99,6 +99,28 @@ export const LEAD_PII_RETENTION_DAYS = 90
 export const MEDIA_GRACE_PERIOD_DAYS = 30
 
 // ---------------------------------------------------------------------------
+// Job queues
+// ---------------------------------------------------------------------------
+
+/**
+ * THE TWO QUEUE NAMES, spelled once.
+ *
+ * A queue name is a bare string in three unrelated places — the `schedule`
+ * entry on a task, the `jobs.queue()` call that enqueues it, and the
+ * `--queue` argument of the worker that drains it. A typo in any one of them
+ * is SILENT: the job is queued to a queue nobody polls, or a worker polls a
+ * queue nothing is queued to. Nothing errors, and the symptom is simply that
+ * the work never happens.
+ *
+ * These constants remove two of the three opportunities to get it wrong. The
+ * third — the `--queue` argument in docker-compose.prod.yml and in the Railway
+ * service start command — is a deployment string that no constant can reach,
+ * so a test asserts the exact literals these must equal.
+ */
+export const DEFAULT_QUEUE = 'default'
+export const MAINTENANCE_QUEUE = 'maintenance'
+
+// ---------------------------------------------------------------------------
 // Uploads
 // ---------------------------------------------------------------------------
 

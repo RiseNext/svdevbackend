@@ -2,6 +2,7 @@ import { APIError, type CollectionAfterChangeHook, type CollectionBeforeValidate
 
 import {
   DEFAULT_COUNTRY_CALLING_CODE,
+  DEFAULT_QUEUE,
   LEAD_DEDUPE_WINDOW_MS,
   MAX_PHONE_DIGITS,
   MIN_PHONE_DIGITS,
@@ -166,7 +167,7 @@ export const enqueueLeadNotification: CollectionAfterChangeHook = async ({
       // An ID, never the object — the docs' own rule. The handler re-reads the
       // lead, so a retry always works from current data.
       input: { leadId: String(doc.id) },
-      queue: 'default',
+      queue: DEFAULT_QUEUE,
       req,
     })
   } catch (err) {

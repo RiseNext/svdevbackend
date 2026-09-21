@@ -30,6 +30,10 @@ export const resetTestDatabase = async (payload: Payload): Promise<void> => {
     'audit_log',
     'payload_jobs_log',
     'payload_jobs',
+    // Holds `scheduledRuns.<queue>.tasks.<slug>.lastScheduledRun`. Leaving it
+    // behind makes the scheduling tests order-dependent: a second run would see
+    // a recent lastScheduledRun and compute a different nextRun than the first.
+    'payload_jobs_stats',
     'leads',
     'projects',
     'testimonials',

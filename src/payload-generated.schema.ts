@@ -1387,6 +1387,7 @@ export const payload_jobs = pgTable(
       precision: 3,
     }),
     processing: boolean("processing").default(false),
+    meta: jsonb("meta"),
     updatedAt: timestamp("updated_at", {
       mode: "string",
       withTimezone: true,
@@ -1883,6 +1884,21 @@ export const _site_settings_v_texts = pgTable(
     }).onDelete("cascade"),
   ],
 );
+
+export const payload_jobs_stats = pgTable("payload_jobs_stats", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  stats: jsonb("stats"),
+  updatedAt: timestamp("updated_at", {
+    mode: "string",
+    withTimezone: true,
+    precision: 3,
+  }),
+  createdAt: timestamp("created_at", {
+    mode: "string",
+    withTimezone: true,
+    precision: 3,
+  }),
+});
 
 export const relations_users_sessions = relations(
   users_sessions,
@@ -2462,6 +2478,10 @@ export const relations__site_settings_v = relations(
     }),
   }),
 );
+export const relations_payload_jobs_stats = relations(
+  payload_jobs_stats,
+  () => ({}),
+);
 
 type DatabaseSchema = {
   enum_admin_role: typeof enum_admin_role;
@@ -2531,6 +2551,7 @@ type DatabaseSchema = {
   _site_hero_ticker_v: typeof _site_hero_ticker_v;
   _site_settings_v: typeof _site_settings_v;
   _site_settings_v_texts: typeof _site_settings_v_texts;
+  payload_jobs_stats: typeof payload_jobs_stats;
   relations_users_sessions: typeof relations_users_sessions;
   relations_users: typeof relations_users;
   relations_media_texts: typeof relations_media_texts;
@@ -2581,6 +2602,7 @@ type DatabaseSchema = {
   relations__site_hero_ticker_v: typeof relations__site_hero_ticker_v;
   relations__site_settings_v_texts: typeof relations__site_settings_v_texts;
   relations__site_settings_v: typeof relations__site_settings_v;
+  relations_payload_jobs_stats: typeof relations_payload_jobs_stats;
 };
 
 declare module "@payloadcms/db-postgres" {

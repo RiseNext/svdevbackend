@@ -62,13 +62,51 @@ Each step gates the next. Do not skip ahead.
 
  8. Deploy the cms container.  curl https://cms.<domain>/healthz  -> {"status":"ok"}
 
- 9. PAYLOAD_SEED=true npm run seed
+ 9. SEED — 🔴 FROM YOUR WORKSTATION, NOT FROM THE PRODUCTION CONTAINER.
+
+    This step previously read `PAYLOAD_SEED=true npm run seed` as though it ran
+    inside the deployed container. IT CANNOT, and the reason is a guard working
+    exactly as designed:
+      · the env schema FAILS BOOT when NODE_ENV=production and PAYLOAD_SEED is
+        set ("its absence IS the guard against seeding over live edits");
+      · `next build` bakes NODE_ENV=production INTO the image, so a runtime
+        `-e NODE_ENV=development` has no effect (measured, not assumed);
+      · so the seed refuses before its own PAYLOAD_SEED check is even reached.
+
+    Run it from a workstation checkout instead, pointed at the Neon DIRECT
+    endpoint. NODE_ENV is not production there, so the guard does not fire —
+    and the production boot guard stays fully intact.
+
+      cd svbackend
+      PAYLOAD_SEED=true \
+      DATABASE_URL="<NEON_DIRECT_URL>" DATABASE_SSL=true \
+      PAYLOAD_SECRET="<PAYLOAD_SECRET>" \
+      NEXT_PUBLIC_SERVER_URL="https://cms.<domain>" \
+      CORS_ORIGINS="https://www.<domain>" CSRF_ORIGINS="https://cms.<domain>" \
+      EMAIL_FROM_ADDRESS="<from>" EMAIL_FROM_NAME="SV Developers" \
+      CLOUDINARY_CLOUD_NAME="<name>" CLOUDINARY_API_KEY="<key>" \
+      CLOUDINARY_API_SECRET="<secret>" \
+        npm run seed
+
     -> 2 admins, site-settings, 5 projects, 9 media assets.
-    THEN UNSET PAYLOAD_SEED. Its absence IS the guard.
+
+    🔴 The CLOUDINARY_* values are NOT optional here. Omit them and the nine
+    seeded assets land on the workstation's local disk instead of Cloudinary,
+    and production shows broken images with no error anywhere.
+
+    The seed is an UPSERT on natural keys: running it twice produces 5
+    projects, not 10. It prints the two generated admin passwords ONCE.
+
+    ALTERNATIVE: skip the seed entirely and let Payload's first-user screen
+    create the initial admin, then enter content through the Admin Panel.
 
 10. Rotate the seeded admin passwords. Confirm no default credentials remain.
 
 11. Deploy worker-default and worker-maintenance, ONE REPLICA EACH.
+    Both are required as of migration 003: worker-maintenance owns the
+    `maintenance` queue and is the only process that runs --handle-schedules,
+    which is what queues purgeLeadPii, sweepDeletedMedia and
+    watchdogFailedJobs. See §4b.
 
 12. 🔴 UPLOAD ONE REAL IMAGE IN PRODUCTION, THEN OPEN ITS DELIVERY URL.
     This one step is the ONLY detector for THREE failures that are all invisible
@@ -178,6 +216,57 @@ request body.
 Also block `/payload-api/<collection-slug>` from the public internet, allowing
 only the admin origin. There is **no documented REST kill switch** in Payload, so
 this layer is load-bearing rather than defence-in-depth.
+
+---
+
+## 4b. Scheduled maintenance — what runs, when, and on which worker
+
+Added with **migration 003**. Before it, these three tasks were defined and
+registered but **nothing ever ran them**: none declared a `schedule` and no hook
+queued them, so `worker-maintenance` polled an empty queue indefinitely while
+appearing healthy. Every test passed throughout. That is the failure this
+section exists to prevent recurring.
+
+| Task | Cron | Cadence | Why that cadence |
+|---|---|---|---|
+| `purgeLeadPii` | `45 21 * * *` | Daily, 21:45 UTC (03:15 IST) | Retention is **90 days**, so the deadline moves once a day. Finer buys nothing; coarser leaves records past the window |
+| `sweepDeletedMedia` | `15 22 * * *` | Daily, 22:15 UTC (03:45 IST) | Grace period is **30 days** — same reasoning. Deliberately **30 min after** the purge: both run on one worker and this one issues real Cloudinary deletes |
+| `watchdogFailedJobs` | `*/15 * * * *` | Every 15 min | Its handler re-queues failed jobs with `waitUntil = +15 min`. A longer cadence leaves them sitting past their own wait; a shorter one re-examines jobs still deliberately waiting |
+
+All three are scheduled onto the **`maintenance`** queue. Nothing is scheduled
+onto `default` — that would let `worker-default` and the schedule handler fight
+over the same job.
+
+**🔴 Timezone.** Payload builds the cron with croner and passes **no timezone**,
+so it resolves in the **process's local time**. The Dockerfile pins `ENV TZ=UTC`
+so the times above mean what they say; a test asserts that pin.
+
+**🔴 Only ONE process may run `--handle-schedules`.** The docs are explicit that
+multiple servers handling schedules each queue their own copy. That process is
+`worker-maintenance`, at exactly one replica. Payload's own
+`defaultBeforeSchedule` refuses to schedule a task already running or already
+scheduled in future — proven by test, which is what makes a worker restart safe.
+
+**⚠️ The `autoRun` fallback does NOT cover these.** `autoRun` schedules only for
+a matching queue name, and its single entry polls `default`. If worker
+containers are ever dropped in favour of `autoRun`, add a `maintenance` entry or
+set `allQueues: true`, or the PII purge, media sweep and dead-letter watchdog
+silently stop.
+
+**Verifying it works after deploy:**
+
+```bash
+# In the worker-maintenance logs, within 15 minutes of start:
+#   expect watchdogFailedJobs to run
+# In the database:
+docker run --rm postgres:15 psql "$DATABASE_URL" -c \
+  "select task_slug, queue, completed_at, has_error
+     from payload_jobs where queue='maintenance' order by created_at desc limit 10;"
+
+# lastScheduledRun bookkeeping (empty until the first scheduled run):
+docker run --rm postgres:15 psql "$DATABASE_URL" -c \
+  "select stats from payload_jobs_stats;"
+```
 
 ---
 

@@ -26,7 +26,7 @@ import { SiteSettings } from './globals/SiteSettings'
 import { tasks } from './jobs'
 import { logger } from './lib/logger'
 import { storagePlugin } from './media/storage'
-import { MAX_DOCUMENT_BYTES } from './lib/constants'
+import { DEFAULT_QUEUE, MAX_DOCUMENT_BYTES } from './lib/constants'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -238,9 +238,20 @@ export default buildConfig({
     // produces DUPLICATE lead notifications.
     // ⚠️ Not used in development: HMR disrupts cron schedules, and a developer
     // relying on autoRun sees notifications stop after the first file save.
+    //
+    // 🔶 SCOPE LIMIT, RECORDED RATHER THAN SILENTLY ACCEPTED. `autoRun` does
+    // schedule `schedule`-bearing tasks by default — but only "given the queue
+    // name is the same". This entry polls DEFAULT_QUEUE, while all three
+    // maintenance schedules target MAINTENANCE_QUEUE, so THIS FALLBACK DOES NOT
+    // RUN THEM. That is correct for the intended deployment, where
+    // `worker-maintenance` owns that queue and `--handle-schedules`.
+    // If this fallback is ever adopted INSTEAD of worker containers, add a
+    // second entry for MAINTENANCE_QUEUE (or set `allQueues: true` on one entry
+    // and delete the other) — otherwise the PII purge, the media sweep and the
+    // dead-letter watchdog silently never run.
     ...(env.ENABLE_JOB_WORKERS
       ? {
-          autoRun: [{ cron: '* * * * *', queue: 'default', limit: 25 }],
+          autoRun: [{ cron: '* * * * *', queue: DEFAULT_QUEUE, limit: 25 }],
           shouldAutoRun: async () => env.ENABLE_JOB_WORKERS,
         }
       : {}),

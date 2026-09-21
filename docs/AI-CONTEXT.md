@@ -142,9 +142,9 @@ The admin backend can change what the public website says about legally-regulate
 | Frontend | ✅ Built, and now **integrated with the CMS** on branch `feat/cms-integration`. Verified against a baseline build of `main`: **zero route regressions**, First Load JS unchanged-or-smaller |
 | **Architecture decision** | ✅ **DECIDED — Payload CMS 3 (§2b, D-015)** — reconfirmed 20 Sep 2026 against the official Payload 3 docs; **no technical blocker found** |
 | **Implementation plan** | ✅ **[`MASTER-IMPLEMENTATION-PLAN.md`](./MASTER-IMPLEMENTATION-PLAN.md)** + **[`MASTER-IMPLEMENTATION-CHECKLIST.md`](./MASTER-IMPLEMENTATION-CHECKLIST.md)** (20 Sep 2026) |
-| Backend code | ✅ **BUILT.** Payload 3.90.1 + Next 16.3.3 + PostgreSQL 15. 9 collections + 1 global, 50 physical tables, 7 public endpoints, 2 probes, **103 passing tests** |
+| Backend code | ✅ **BUILT.** Payload 3.90.1 + Next 16.3.3 + PostgreSQL 15. 9 collections + 1 global, 50 physical tables, 7 public endpoints, 2 probes, **132 passing tests** |
 | Backend docs | ✅ This set (21 documents) |
-| Database | ✅ Created. Migrations 001 (schema) + 002 (consent CHECK), reversibility proven up→down→up |
+| Database | ✅ Created. Migrations 001 (schema) + 002 (consent CHECK) + 003 (`payload-jobs-stats` global + `payload_jobs.meta`, required by task scheduling), reversibility proven up→down→up on each |
 | Production targets | ✅ **CHOSEN 20 Sep 2026** — **Neon PostgreSQL** (D-124) + **Cloudinary** (D-123). Code, env schema and docs all reflect it; no migration was needed |
 | Hosting | ❌ Not provisioned. `Dockerfile`, `docker-compose.prod.yml`, `RUNBOOK.md` and `PRODUCTION-CONFIG.md` are ready |
 | Next step | **Owner deliverables** — see [`PRODUCTION-CONFIG.md`](./PRODUCTION-CONFIG.md) §4–§6. Nothing engineering-side blocks. Still open: the **domain**, the **privacy-policy URL**, **testimonials**, all `[BRACKETED]` values, the **registered legal entity name**, and the email provider |

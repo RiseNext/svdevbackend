@@ -5,6 +5,7 @@ import type {
   PayloadRequest,
 } from 'payload'
 
+import { DEFAULT_QUEUE } from '@/lib/constants'
 import { env } from '@/lib/env'
 
 /**
@@ -61,7 +62,7 @@ const revalidate = async (req: PayloadRequest, paths: string[], tags: string[]):
       await req.payload.jobs.queue({
         task: 'revalidatePaths',
         input: { paths, tags },
-        queue: 'default',
+        queue: DEFAULT_QUEUE,
       })
     } catch (queueErr) {
       // Both paths failed. The time-based `revalidate: 3600` floor on the

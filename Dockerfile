@@ -62,6 +62,23 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# ---------------------------------------------------------------------------
+# 🔴 TZ IS LOAD-BEARING FOR THE JOB SCHEDULES — pin it, do not inherit it.
+#
+# Payload evaluates a task's `schedule.cron` with `new Cron(cron, {...})` and
+# passes NO timezone, so croner uses the PROCESS'S LOCAL TIME. `ScheduleConfig`
+# exposes no timezone option, so the container's TZ is the only lever there is.
+#
+# Alpine already defaults to UTC, so this changes nothing today — it stops a
+# future base-image or platform change from silently moving the nightly PII
+# purge and media sweep to a different hour. A test asserts the same assumption
+# (tests/integration/jobs.test.ts).
+#
+#   45 21 * * *  -> 21:45 UTC = 03:15 IST   purgeLeadPii
+#   15 22 * * *  -> 22:15 UTC = 03:45 IST   sweepDeletedMedia
+# ---------------------------------------------------------------------------
+ENV TZ=UTC
+
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs
 

@@ -1,7 +1,11 @@
 import { JobCancelledError, type TaskConfig } from 'payload'
 
 import { renderLeadEmail, renderLeadEmailText } from '@/email/renderLeadEmail'
-import { LEAD_PII_RETENTION_DAYS, MEDIA_GRACE_PERIOD_DAYS } from '@/lib/constants'
+import {
+  LEAD_PII_RETENTION_DAYS,
+  MAINTENANCE_QUEUE,
+  MEDIA_GRACE_PERIOD_DAYS,
+} from '@/lib/constants'
 import { env } from '@/lib/env'
 
 /**
@@ -185,6 +189,21 @@ export const purgeLeadPii: TaskConfig<'purgeLeadPii'> = {
   outputSchema: [{ name: 'purged', type: 'number', required: true }],
 
   /**
+   * DAILY, 21:45 UTC = 03:15 IST.
+   *
+   * The retention window is LEAD_PII_RETENTION_DAYS = 90 days, so the deadline
+   * this enforces moves once per day. Anything finer buys nothing and re-reads
+   * the same rows; anything coarser lets a record sit past its window for up to
+   * that interval. Daily is the coarsest cadence that still lands the purge
+   * within 24h of the boundary.
+   *
+   * Off-peak for an Indian audience, and on a :15/:45 boundary so it is picked
+   * up on the maintenance worker's very next tick rather than waiting up to a
+   * further 15 minutes.
+   */
+  schedule: [{ cron: '45 21 * * *', queue: MAINTENANCE_QUEUE }],
+
+  /**
    * FR-LEAD-16 / DPDP. Nulls `ipAddress` and `userAgent` on leads older than the
    * retention window. The LEAD RECORD ITSELF IS NOT DELETED — a lead is a
    * commercial record.
@@ -241,6 +260,20 @@ export const sweepDeletedMedia: TaskConfig<'sweepDeletedMedia'> = {
   retries: 2,
   inputSchema: [],
   outputSchema: [{ name: 'swept', type: 'number', required: true }],
+
+  /**
+   * DAILY, 22:15 UTC = 03:45 IST.
+   *
+   * MEDIA_GRACE_PERIOD_DAYS = 30, so like the PII purge this deadline advances
+   * once a day and daily is the matching cadence.
+   *
+   * 🔴 DELIBERATELY 30 MINUTES AFTER `purgeLeadPii`, NOT ALONGSIDE IT. Both run
+   * on the single maintenance worker, and this task issues real deletes against
+   * Cloudinary. Overlapping them on one worker would serialise anyway, but
+   * staggering keeps a slow Cloudinary response from delaying a compliance task,
+   * and keeps the two apart in the logs when something goes wrong.
+   */
+  schedule: [{ cron: '15 22 * * *', queue: MAINTENANCE_QUEUE }],
 
   /**
    * Hard-deletes media soft-deleted more than the grace period ago.
@@ -323,6 +356,27 @@ export const watchdogFailedJobs: TaskConfig<'watchdogFailedJobs'> = {
   retries: 1,
   inputSchema: [],
   outputSchema: [{ name: 'alerts', type: 'number', required: true }],
+
+  /**
+   * EVERY 15 MINUTES — the one task here that is not daily, and the interval is
+   * not arbitrary.
+   *
+   * The handler re-queues a failed job with `waitUntil` set 15 minutes out. A
+   * cadence LONGER than that leaves a re-queued job sitting past its own wait;
+   * a cadence SHORTER re-examines jobs that are still deliberately waiting and
+   * inflates `totalTried` without doing any work. Matching the two makes each
+   * tick pick up exactly the jobs whose delay has just expired.
+   *
+   * It also matches the maintenance worker's own poll interval
+   * (`--cron "*\/15 * * * *"` in docker-compose.prod.yml), so a due watchdog run
+   * is never left waiting for the next tick.
+   *
+   * 🔴 THIS IS THE DEAD-LETTER DETECTOR. A `sendLeadNotification` that exhausts
+   * its retries during an SMTP outage is otherwise lost with nothing but a
+   * database row. Of the three tasks here it is the one whose absence actually
+   * loses business data, which is why it runs 96x more often than the others.
+   */
+  schedule: [{ cron: '*/15 * * * *', queue: MAINTENANCE_QUEUE }],
 
   /**
    * 🔴 PAYLOAD SHIPS NO DEAD-LETTER QUEUE, NO DOCUMENTED BACKOFF AND NO
