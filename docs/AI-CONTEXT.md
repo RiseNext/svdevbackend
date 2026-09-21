@@ -20,7 +20,7 @@ The software is **two halves**:
 | Half | What it is | Who uses it | Where it lives |
 |---|---|---|---|
 | **Public website** | Marketing site — browse projects, read details, submit an enquiry. **No login.** | Anonymous visitors (prospective plot buyers) | `svfrontend/` — exists, built, working |
-| **Admin backend / CMS** | Private system where staff manage projects, content, media and leads | **Administrators only** | `svbackend/` — **does not exist yet** |
+| **Admin backend / CMS** | Private system where staff manage projects, content, media and leads | **Administrators only** | `svbackend/` — **built** (see §11; this row said "does not exist yet" before implementation) |
 
 The backend's job is to **become the source of the content the public website displays**, replacing today's hardcoded TypeScript content files, and to **capture and manage leads**.
 
@@ -54,7 +54,7 @@ Payload CMS 3  ──► auto-generated admin UI + media library
       └──► Email                   (queued lead notifications — provider OQ-7b)
 ```
 
-**Stack:** TypeScript · **Node ≥ 20.9.0** *(Node 24.11.0 in use — see §11b #5; **not** "Node 20 LTS", and the frontend's `<23` pin must not be copied)* · Payload CMS 3 (MIT, self-hosted) hosted in its own Next.js app **separate from `svfrontend`**, pinned to **`next@16.3.3`** *(§11b #1 — the frontend's 15.5.x is unsupported by Payload)* · PostgreSQL 15+ via Payload's Postgres adapter · Payload/Drizzle migrations · S3-compatible storage · Zod for custom endpoints · Vitest + contract tests · **npm** *(yarn 1.x is unsupported; pnpm not installed)*.
+**Stack:** TypeScript · **Node ≥ 20.9.0** *(Node 24.11.0 in use — see §11b #5; **not** "Node 20 LTS", and the frontend's `<23` pin must not be copied)* · Payload CMS 3 (MIT, self-hosted) hosted in its own Next.js app **separate from `svfrontend`**, pinned to **`next@16.3.3`** *(§11b #1 — the frontend's 15.5.x is unsupported by Payload)* · PostgreSQL 15+ via Payload's Postgres adapter (**Neon** in production — D-124) · Payload/Drizzle migrations · **Cloudinary** media via a hand-written adapter on `@payloadcms/plugin-cloud-storage` (D-123 — *this line said "S3-compatible storage" before that decision*) · Zod for custom endpoints · Vitest + contract tests · **npm** *(yarn 1.x is unsupported; pnpm not installed)*.
 
 **Rejected:** custom TypeScript backend · **Python/FastAPI** (would hand-maintain a TS contract in a second language while still leaving the admin UI unbuilt) · Strapi (weak ordering, furthest API shape) · **Directus — the designated fallback** if Phase 1 invalidates the Postgres adapter.
 
@@ -142,7 +142,7 @@ The admin backend can change what the public website says about legally-regulate
 | Frontend | ✅ Built, and now **integrated with the CMS** on branch `feat/cms-integration`. Verified against a baseline build of `main`: **zero route regressions**, First Load JS unchanged-or-smaller |
 | **Architecture decision** | ✅ **DECIDED — Payload CMS 3 (§2b, D-015)** — reconfirmed 20 Sep 2026 against the official Payload 3 docs; **no technical blocker found** |
 | **Implementation plan** | ✅ **[`MASTER-IMPLEMENTATION-PLAN.md`](./MASTER-IMPLEMENTATION-PLAN.md)** + **[`MASTER-IMPLEMENTATION-CHECKLIST.md`](./MASTER-IMPLEMENTATION-CHECKLIST.md)** (20 Sep 2026) |
-| Backend code | ✅ **BUILT.** Payload 3.90.1 + Next 16.3.3 + PostgreSQL 15. 9 collections + 1 global, 50 physical tables, 7 public endpoints, 2 probes, 89 passing tests |
+| Backend code | ✅ **BUILT.** Payload 3.90.1 + Next 16.3.3 + PostgreSQL 15. 9 collections + 1 global, 50 physical tables, 7 public endpoints, 2 probes, **103 passing tests** |
 | Backend docs | ✅ This set (21 documents) |
 | Database | ✅ Created. Migrations 001 (schema) + 002 (consent CHECK), reversibility proven up→down→up |
 | Production targets | ✅ **CHOSEN 20 Sep 2026** — **Neon PostgreSQL** (D-124) + **Cloudinary** (D-123). Code, env schema and docs all reflect it; no migration was needed |

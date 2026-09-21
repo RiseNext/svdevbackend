@@ -24,7 +24,7 @@
 |---|---|
 | D-015 validation gate | ✅ **PASSED** — Directus fallback NOT triggered. [`PHASE-1-GATE-REPORT.md`](./PHASE-1-GATE-REPORT.md) |
 | Backend | ✅ Built. 9 collections + 1 global, 50 tables, 7 public endpoints, 2 probes |
-| Tests | ✅ **89 passing** (unit · config/access · domain integration) |
+| Tests | ✅ **103 passing** (unit · config/access · domain integration) |
 | Typecheck | ✅ Clean in **both** repositories |
 | Production build | ✅ Passes, standalone output emitted |
 | Migrations | ✅ 001 + 002, reversibility proven **up → down → up** |
@@ -174,7 +174,7 @@ leaked keys: NONE
 
 Two bugs that shipped live are fixed: `mailto:[EMAIL@DOMAIN]` (the bracket landed inside the string, so the inert-link guard never fired) and the raw-digit WhatsApp href (inert only by accident). Nav/footer project lists are now **derived**; `README.md:42`'s claim that they were automatic was false. `www.example.com` is gone from the built output.
 
-**Tests: 89 passing.** Admin browser E2E is **deferred, not skipped** — there is zero official guidance and any suite would couple to an admin DOM Payload never guarantees. The ADMIN WORKFLOW integration layer exercises the same access control and hooks the UI calls.
+**Tests: 103 passing** — 31 domain integration · 31 config/access · 27 serialiser · 14 Cloudinary URL. Admin browser E2E is **deferred, not skipped** — there is zero official guidance and any suite would couple to an admin DOM Payload never guarantees. The ADMIN WORKFLOW integration layer exercises the same access control and hooks the UI calls.
 
 ---
 
@@ -236,7 +236,7 @@ PAYLOAD_SEED=true npm run seed                     # prints admin passwords once
 # Tests
 docker compose -f docker-compose.test.yml up -d
 DATABASE_URL=postgres://postgres:test@localhost:5433/sv_test npm run migrate
-npm test                                           # 89 tests
+npm test                                           # 103 tests
 npm run check:drift && npm run typecheck
 
 # Frontend

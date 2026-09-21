@@ -123,9 +123,14 @@ const handler = async (req: Request) => {
    * a real timestamp, the same message string. Nothing is persisted, nothing is
    * queued.
    *
-   * ⚠️ HONEST SCOPE NOTE: `ContactForm.tsx` has NO honeypot field today. Until
-   * the frontend adds one, this protects nothing and the rate limit plus
-   * Idempotency-Key are the only spam controls. Saying so beats implying coverage.
+   * ✅ THE FRONTEND NOW RENDERS THE FIELD. `ContactForm.tsx` submits a
+   * `website` input — off-screen rather than `display:none`, `tabIndex={-1}`,
+   * `autoComplete="off"` — and the name matches `HONEYPOT_FIELD` exactly, which
+   * is why that constant is shared rather than spelled twice.
+   *
+   * ⚠️ REMAINING SCOPE NOTE: a honeypot stops naive form-fillers, not a bot that
+   * reads the DOM. Rate limiting is still edge/proxy configuration (D-030,
+   * RUNBOOK.md §4) and is NOT in this application.
    */
   if (honeypotTriggered(body)) {
     return successBody(randomUUID(), new Date().toISOString())
