@@ -5,6 +5,7 @@ import type {
   ProximityItem,
 } from '@/types/frontend-contract'
 import { coerceIcon } from '@/lib/icons'
+import { cloudinaryFileUrl } from '@/media/mediaUrl'
 
 import { put } from './put'
 import { toImageRef, toImageRefOrUndefined } from './toImageRef'
@@ -76,6 +77,48 @@ const seoOrUndefined = (
 }
 
 /**
+ * Compose the brochure `href` DETERMINISTICALLY rather than trusting `url`.
+ *
+ * 🔴 THIS IS THE SAME RULE `toImageRef.ts` ALREADY FOLLOWS, AND IGNORING IT
+ * PUT A 404 IN PRODUCTION. `url` on an upload collection is a VIRTUAL field:
+ * the cloud-storage plugin recomputes it from `{ filename, prefix }` every time
+ * the relation is populated. `documents.defaultPopulate` is
+ * `{ filename, url, title }` and does NOT include `prefix`, so during population
+ * `prefix` arrives `undefined`, `generateURL` composes without the folder, and
+ * the emitted href becomes
+ *
+ *   https://res.cloudinary.com/<cloud>/raw/upload/<uuid>.pdf     -> 404
+ *
+ * while the asset really lives at
+ *
+ *   https://res.cloudinary.com/<cloud>/raw/upload/documents/<uuid>.pdf  -> 200
+ *
+ * The stored `documents.url` COLUMN is correct — it was written at upload time,
+ * when `prefix` was in scope — which is exactly why the column and the API
+ * response disagreed and the bug was invisible until a human clicked the link.
+ *
+ * `media` was never affected because `toImageRef` passes its prefix as a
+ * LITERAL (`'media'`) and never reads the column. Passing `'documents'` the same
+ * way removes the dependency entirely: `cloudinaryFileUrl` is the SAME function
+ * the storage adapter's `generateURL` calls, so what Payload persists and what
+ * this emits are produced by one definition and cannot drift apart.
+ *
+ * `filename` IS in `documents.defaultPopulate`, so this needs no query change,
+ * no `defaultPopulate` change and no migration.
+ *
+ * The `url` fallback is retained for LOCAL DEVELOPMENT, where Cloudinary is
+ * deliberately unconfigured, `cloudinaryFileUrl` returns undefined and files are
+ * served from disk — mirroring `buildSrc` in toImageRef.ts.
+ */
+const buildDocumentHref = (doc: { filename?: unknown; url?: unknown }): string => {
+  if (typeof doc.filename === 'string' && doc.filename) {
+    const cdn = cloudinaryFileUrl('documents', doc.filename)
+    if (cdn) return cdn
+  }
+  return typeof doc.url === 'string' ? doc.url.trim() : ''
+}
+
+/**
  * The brochure PDF -> `{ title, href }`, or OMITTED.
  *
  * 🔴 BOTH-OR-NEITHER, AND FOR A CONCRETE REASON. `href` comes from the stored
@@ -98,7 +141,7 @@ const brochureOrUndefined = (
   // A bare id means the relation was not populated — never guess a URL from it.
   if (!brochure || typeof brochure !== 'object') return undefined
 
-  const href = typeof brochure.url === 'string' ? brochure.url.trim() : ''
+  const href = buildDocumentHref(brochure)
   if (!href) return undefined
 
   const title =
