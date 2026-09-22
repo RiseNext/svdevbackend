@@ -21,6 +21,7 @@ import { Projects } from './collections/Projects'
 import { Statistics } from './collections/Statistics'
 import { Testimonials } from './collections/Testimonials'
 import { Users } from './collections/Users'
+import { Videos } from './collections/Videos'
 import { SiteSettings } from './globals/SiteSettings'
 import { tasks } from './jobs'
 import { logger } from './lib/logger'
@@ -178,6 +179,7 @@ export default buildConfig({
     Users,
     Media,
     Documents,
+    Videos,
     Projects,
     Leads,
     Testimonials,

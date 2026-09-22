@@ -177,7 +177,10 @@ export const sweepDeletedMedia: TaskConfig<'sweepDeletedMedia'> = {
     const cutoff = daysAgo(MEDIA_GRACE_PERIOD_DAYS)
     let swept = 0
 
-    for (const collection of ['media', 'documents'] as const) {
+    // `videos` joins the existing list — the sweeper is collection-agnostic and
+    // the adapter's `handleDelete` derives the Cloudinary resource type from the
+    // filename, so a swept video is destroyed as `video` rather than orphaned.
+    for (const collection of ['media', 'documents', 'videos'] as const) {
       const expired = await req.payload.find({
         collection,
         overrideAccess: true,

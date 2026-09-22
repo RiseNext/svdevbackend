@@ -3,6 +3,7 @@ import * as migration_20260920_160000_testimonial_consent_check from './20260920
 import * as migration_20260921_071137_jobs_stats_global from './20260921_071137_jobs_stats_global';
 import * as migration_20260921_120000_drop_lead_notified_at from './20260921_120000_drop_lead_notified_at';
 import * as migration_20260922_020330_add_project_brochure from './20260922_020330_add_project_brochure';
+import * as migration_20260922_073843_add_videos from './20260922_073843_add_videos';
 
 export const migrations = [
   {
@@ -28,6 +29,11 @@ export const migrations = [
   {
     up: migration_20260922_020330_add_project_brochure.up,
     down: migration_20260922_020330_add_project_brochure.down,
-    name: '20260922_020330_add_project_brochure'
+    name: '20260922_020330_add_project_brochure',
+  },
+  {
+    up: migration_20260922_073843_add_videos.up,
+    down: migration_20260922_073843_add_videos.down,
+    name: '20260922_073843_add_videos'
   },
 ];

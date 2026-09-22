@@ -33,6 +33,27 @@ export type ImageRef = {
   height: number;
 };
 
+/**
+ * A reusable video asset, as published by the CMS.
+ *
+ * PLACEMENT IS NOT PART OF THIS CONTRACT, DELIBERATELY. The backend answers
+ * only "which video is currently active"; where — and whether — it is rendered
+ * is a decision this repository owns. The same value can back a full-bleed
+ * hero today and a section band later with no CMS change.
+ *
+ * `poster` is an `ImageRef` rather than a bare URL for two reasons: it is an
+ * ordinary image from the same media library as everything else, and carrying
+ * its dimensions is what lets a call site use `next/image` without reflowing.
+ * It is REQUIRED because a silent autoplaying video is not guaranteed to start
+ * — iOS Low Power Mode, Data Saver and `prefers-reduced-motion` all refuse it —
+ * and the poster is what the visitor sees when it does not.
+ */
+export type VideoRef = {
+  src: string;
+  mimeType: string;
+  poster: ImageRef;
+};
+
 export type ProjectStatus = 'Open for booking' | 'Nearing sell-out' | 'Completed' | 'Coming soon';
 
 /** The four catalogue categories. A project carries one only when the

@@ -11,9 +11,11 @@ import sharp from 'sharp'
 import {
   ALLOWED_DOCUMENT_MIME,
   ALLOWED_IMAGE_MIME,
+  ALLOWED_VIDEO_MIME,
   MAX_DOCUMENT_BYTES,
   MAX_IMAGE_BYTES,
   MAX_IMAGE_SIDE_PX,
+  MAX_VIDEO_BYTES,
 } from '@/lib/constants'
 import { looksLikeMarkup, looksLikePdf, looksLikeSvg, sniff } from '@/media/sniff'
 
@@ -37,7 +39,22 @@ import { looksLikeMarkup, looksLikePdf, looksLikeSvg, sniff } from '@/media/snif
  * here will also be threaded to image sizes if they're enabled."
  */
 
-type GuardKind = 'image' | 'document'
+/**
+ * ⚠️ `video` JOINS `document` ON THE NON-RE-ENCODED PATH, NOT `image`.
+ *
+ * The split that matters here is not "what kind of media is it" but "does sharp
+ * touch it". Images are re-encoded (EXIF strip, dimension read, bomb guard);
+ * documents and video are NOT — they are sniffed, checked, renamed and handed
+ * on with their bytes untouched. Video takes the document path for the same
+ * reason a PDF does: there is no safe in-process re-encoder for it, and
+ * pretending otherwise would mean shipping ffmpeg.
+ *
+ * The consequence is load-bearing further down the stack: because neither is
+ * re-encoded, `adoptSanitisedBytes` is never called for them, `tempFilePath`
+ * survives, and the Cloudinary adapter's STREAMING branch is what uploads the
+ * file. That is exactly the path the PDF fix already built and proved.
+ */
+type GuardKind = 'image' | 'document' | 'video'
 
 /**
  * ⚠️ MEASURED, NOT ASSUMED: mutating `req.data` inside `beforeOperation` does
@@ -175,10 +192,15 @@ const makeGuard = (kind: GuardKind): CollectionBeforeOperationHook => {
     // 3. ALLOW-LIST + DECLARED-vs-ACTUAL MISMATCH -> 415
     // ---------------------------------------------------------------------
     const allowed: Record<string, string> =
-      kind === 'image' ? { ...ALLOWED_IMAGE_MIME } : { ...ALLOWED_DOCUMENT_MIME }
+      kind === 'image'
+        ? { ...ALLOWED_IMAGE_MIME }
+        : kind === 'video'
+          ? { ...ALLOWED_VIDEO_MIME }
+          : { ...ALLOWED_DOCUMENT_MIME }
 
     if (!(sniffed.mime in allowed)) {
-      const human = kind === 'image' ? 'JPEG, PNG, WebP or AVIF' : 'PDF'
+      const human =
+        kind === 'image' ? 'JPEG, PNG, WebP or AVIF' : kind === 'video' ? 'an MP4 video' : 'PDF'
       throw new APIError(`That file type is not allowed. Upload ${human}.`, 415)
     }
 
@@ -205,7 +227,8 @@ const makeGuard = (kind: GuardKind): CollectionBeforeOperationHook => {
     //    contract specifies for the config-level limit. That difference is
     //    recorded in API-CONTRACT.md rather than papered over.
     // ---------------------------------------------------------------------
-    const maxBytes = kind === 'image' ? MAX_IMAGE_BYTES : MAX_DOCUMENT_BYTES
+    const maxBytes =
+      kind === 'image' ? MAX_IMAGE_BYTES : kind === 'video' ? MAX_VIDEO_BYTES : MAX_DOCUMENT_BYTES
     if (buf.byteLength > maxBytes) {
       const mb = Math.floor(maxBytes / (1024 * 1024))
       throw new APIError(
@@ -214,8 +237,18 @@ const makeGuard = (kind: GuardKind): CollectionBeforeOperationHook => {
       )
     }
 
-    if (kind === 'document') {
-      // PDFs: no sharp, no dimensions, no re-encode. Rename and finish.
+    if (kind === 'document' || kind === 'video') {
+      // PDFs and video: no sharp, no dimensions, no re-encode. Rename and finish.
+      //
+      // 🔴 `tempFilePath` IS DELIBERATELY LEFT INTACT. `adoptSanitisedBytes` is
+      // the only thing that clears it, and it is reached only on the image path.
+      // Leaving it set is what routes these uploads through the adapter's
+      // STREAMING branch instead of buffering the whole file in memory — the
+      // control `useTempFiles: true` exists for.
+      //
+      // The UUID rename still happens, so the stored key is never the
+      // uploader's filename, and `originalFilename` is still captured for
+      // display. Both are what make `immutable` CDN caching safe.
       ;(context as UploadGuardContext).originalFilename = file.name
       req.file!.mimetype = sniffed.mime
       req.file!.name = `${randomUUID()}.${ext}`
@@ -295,6 +328,7 @@ const makeGuard = (kind: GuardKind): CollectionBeforeOperationHook => {
 
 export const imageUploadGuard = makeGuard('image')
 export const documentUploadGuard = makeGuard('document')
+export const videoUploadGuard = makeGuard('video')
 
 /**
  * Writes the values the guard captured onto the document.

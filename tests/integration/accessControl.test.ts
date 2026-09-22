@@ -236,8 +236,26 @@ describe('the generated REST surface is shaped so a kill switch is unnecessary',
      * must be populatable anonymously or every project card renders without its
      * image. Their sensitive columns (`uploadedBy`, `originalFilename`) are
      * closed at FIELD level instead, which `domain.test.ts` asserts.
+     *
+     * `videos` joins them for EXACTLY the same reason, and the justification is
+     * measured rather than assumed: with `read: isAdmin`, a public read
+     * (`overrideAccess: false`, `user: undefined`) silently degrades
+     * `site-settings.video` to a bare id string — Payload neither throws nor
+     * warns — the serialiser's both-or-neither rule omits the key, and the
+     * website simply never shows the video. It carries the same field-level
+     * closure as the other two (`uploadedBy`, `originalFilename`,
+     * `supersededFilenames` are admin-read-only), and the file itself is public
+     * by construction: it is served from a CDN under a UUID key.
      */
-    const intentionallyPublic = ['projects', 'testimonials', 'faqs', 'statistics', 'media', 'documents']
+    const intentionallyPublic = [
+      'projects',
+      'testimonials',
+      'faqs',
+      'statistics',
+      'media',
+      'documents',
+      'videos',
+    ]
 
     for (const collection of resolved.collections) {
       if (collection.slug.startsWith('payload-')) continue

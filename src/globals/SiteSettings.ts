@@ -266,6 +266,39 @@ export const SiteSettings: GlobalConfig = {
                 description: 'The master-plan PDF offered for download on /master-plan.',
               },
             },
+            {
+              /**
+               * 🔴 THE ACTIVE VIDEO — AND THE NAME IS DELIBERATELY `video`, NOT
+               * `heroVideo`.
+               *
+               * This field answers exactly one question: WHICH video is live.
+               * It does not answer WHERE it appears, and it must never grow a
+               * field that does. No placement enum, no section selector, no
+               * ordering, no layout configuration. The website decides where a
+               * video is rendered; the CMS decides which one is current.
+               *
+               * That separation is what makes the asset reusable: the same
+               * value can feed a homepage background today and an about-page
+               * band later with NO backend change of any kind.
+               *
+               * It follows the two references that already live on this global —
+               * `logo` -> media, `masterPlan` -> documents, `video` -> videos —
+               * so it is the third instance of an established pattern rather
+               * than a new mechanism.
+               *
+               * Optional on purpose: clearing it is how a video is taken off the
+               * site WITHOUT deleting the asset. The public serialiser then
+               * omits the key entirely and the frontend falls back to whatever
+               * it renders without one.
+               */
+              name: 'video',
+              type: 'upload',
+              relationTo: 'videos',
+              admin: {
+                description:
+                  'The site’s active video. Where it appears on the website is decided by the website itself — this setting only chooses which video is live. Leave empty for no video.',
+              },
+            },
           ],
         },
       ],

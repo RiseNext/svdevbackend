@@ -28,6 +28,7 @@ const EXPECTED = [
   'users',
   'media',
   'documents',
+  'videos',
   'projects',
   'leads',
   'testimonials',
@@ -45,6 +46,11 @@ const INTENT: Record<string, { create: boolean; update: boolean; delete: boolean
   users: { create: true, update: true, delete: false, why: 'deactivate, never delete' },
   media: { create: true, update: true, delete: true },
   documents: { create: true, update: true, delete: true },
+  // The whole admin story for the video feature: upload, replace (update) and
+  // remove from the library (delete). Taking a video OFF the site is a separate,
+  // non-destructive action — clearing `site-settings.video` — and deleting the
+  // ACTIVE video is refused with a 409 by `videoDeleteGuard`.
+  videos: { create: true, update: true, delete: true },
   projects: { create: true, update: true, delete: true },
   // Leads are captured by the public endpoint, never typed in by an admin.
   leads: { create: false, update: true, delete: true, why: 'created by the public API only' },

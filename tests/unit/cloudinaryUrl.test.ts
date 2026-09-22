@@ -29,7 +29,17 @@ afterEach(() => {
   vi.resetModules()
 })
 
-describe('resource type — images vs raw', () => {
+describe('resource type — images vs video vs raw', () => {
+  /**
+   * 🔴 THE FIRST TWO CASES ARE NO-REGRESSION GUARDS, NOT COVERAGE.
+   *
+   * `resourceTypeFor` is shared by the image path, the PDF path AND the new
+   * video path, and it is what `handleUpload`, `handleDelete` and `generateURL`
+   * all derive from. Adding the `video` branch must leave the existing two
+   * mappings byte-identical: if `jpg` ever stopped resolving to `image`, every
+   * image on the website would 404 and every image delete would silently orphan
+   * its Cloudinary object.
+   */
   it('treats the four allowed image extensions as Cloudinary `image`', async () => {
     const { resourceTypeFor } = await load(CREDS)
     for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'avif']) {
@@ -40,6 +50,28 @@ describe('resource type — images vs raw', () => {
   it('treats a PDF as `raw`', async () => {
     const { resourceTypeFor } = await load(CREDS)
     expect(resourceTypeFor('abc.pdf')).toBe('raw')
+  })
+
+  /**
+   * 🔴 MEASURED AGAINST THE REAL CLOUDINARY ACCOUNT BEFORE THIS BRANCH EXISTED:
+   *     .../video/upload/videos/<uuid>.mp4  -> 200
+   *     .../raw/upload/videos/<uuid>.mp4    -> 404
+   *     .../image/upload/videos/<uuid>.mp4  -> 404
+   * `.mp4` used to fall through to `raw`, so without this every video URL would
+   * 404 and every video delete would silently orphan the asset.
+   */
+  it('treats an MP4 as `video`, not the `raw` fallback it used to hit', async () => {
+    const { resourceTypeFor } = await load(CREDS)
+    expect(resourceTypeFor('abc.mp4')).toBe('video')
+    expect(resourceTypeFor('abc.MP4')).toBe('video')
+  })
+
+  it('does NOT widen to other video containers — only mp4 is allowed', async () => {
+    const { resourceTypeFor } = await load(CREDS)
+    // WebM is deferred, and .mov/.m4v share the ftyp box but are not accepted.
+    for (const ext of ['webm', 'mov', 'm4v', '3gp', 'avi']) {
+      expect(resourceTypeFor(`abc.${ext}`)).toBe('raw')
+    }
   })
 
   it('is case-insensitive — an uploader may send .JPG', async () => {
@@ -68,6 +100,11 @@ describe('public_id — the extension rule Cloudinary states verbatim', () => {
     expect(publicIdFor('documents/3f2b.pdf')).toBe('documents/3f2b.pdf')
   })
 
+  it('STRIPS the extension for a video — Cloudinary states images AND videos', async () => {
+    const { publicIdFor } = await load(CREDS)
+    expect(publicIdFor('videos/3f2b.mp4')).toBe('videos/3f2b')
+  })
+
   it('only strips the FINAL extension, never a dot inside the folder', async () => {
     const { publicIdFor } = await load(CREDS)
     expect(publicIdFor('media/v1.2/3f2b.png')).toBe('media/v1.2/3f2b')
@@ -89,6 +126,19 @@ describe('delivery URL', () => {
     expect(cloudinaryFileUrl('documents', '3f2b.pdf')).toBe(
       'https://res.cloudinary.com/sv-test-cloud/raw/upload/documents/3f2b.pdf',
     )
+  })
+
+  it('composes a video URL under /video/upload/ with no version', async () => {
+    const { cloudinaryFileUrl } = await load(CREDS)
+    expect(cloudinaryFileUrl('videos', '3f2b.mp4')).toBe(
+      'https://res.cloudinary.com/sv-test-cloud/video/upload/videos/3f2b.mp4',
+    )
+  })
+
+  it('video: the id and the URL address the same object', async () => {
+    const { cloudinaryFileUrl, publicIdFor } = await load(CREDS)
+    const url = cloudinaryFileUrl('videos', '3f2b.mp4')!
+    expect(url).toContain(`/video/upload/${publicIdFor('videos/3f2b.mp4')}.mp4`)
   })
 
   it('agrees with publicIdFor — the id and the URL address the same object', async () => {

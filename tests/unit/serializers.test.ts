@@ -399,3 +399,76 @@ describe('toPublicSiteSettings — copyrightText on an unsaved global', () => {
     expect(out.whatsapp).toBe('')
   })
 })
+
+describe('toPublicSiteSettings — the active video (both-or-neither)', () => {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const base = {
+    name: 'SV', legalName: 'SV', url: 'https://e.test',
+    email: 'a@e.test', phone: '1', whatsapp: '919000000000', address: ['L'],
+  }
+  const poster = {
+    id: 'm1', filename: 'p.jpg', url: '/local/p.jpg',
+    alt: 'A still', isDecorative: false, width: 1920, height: 1080,
+  }
+  const video = { id: 'v1', filename: 'abc.mp4', url: '/local/abc.mp4', mimeType: 'video/mp4', title: 'T', poster }
+  const ser = (doc: any) => toPublicSiteSettings(doc) as any
+
+  it('emits exactly { src, mimeType, poster } and nothing else', () => {
+    const out = ser({ ...base, video })
+    expect(Object.keys(out.video).sort()).toEqual(['mimeType', 'poster', 'src'])
+    expect(out.video.mimeType).toBe('video/mp4')
+    expect(Object.keys(out.video.poster).sort()).toEqual(['alt', 'height', 'src', 'width'])
+    expect(out.video.poster.width).toBe(1920)
+  })
+
+  it('leaks no internal field — no id, title, filesize, uploadedBy or originalFilename', () => {
+    const out = ser({
+      ...base,
+      video: { ...video, uploadedBy: 'u1', originalFilename: 'secret.mp4', filesize: 123, supersededFilenames: ['old.mp4'] },
+    })
+    const json = JSON.stringify(out.video)
+    for (const leak of ['uploadedBy', 'originalFilename', 'supersededFilenames', 'filesize', 'title', '"id"']) {
+      expect(json, `must not leak ${leak}`).not.toContain(leak)
+    }
+  })
+
+  it('OMITS the key when no video is configured', () => {
+    expect('video' in ser({ ...base })).toBe(false)
+    expect('video' in ser({ ...base, video: null })).toBe(false)
+  })
+
+  it('OMITS the key when the relation is an unpopulated bare id', () => {
+    // A depth-too-shallow read. Never guess a URL from an id.
+    expect('video' in ser({ ...base, video: 'v1' })).toBe(false)
+  })
+
+  it('OMITS the key when the POSTER is a bare id — the depth-1 symptom', () => {
+    expect('video' in ser({ ...base, video: { ...video, poster: 'm1' } })).toBe(false)
+  })
+
+  it('OMITS the key when the poster is missing entirely', () => {
+    expect('video' in ser({ ...base, video: { ...video, poster: null } })).toBe(false)
+  })
+
+  it('OMITS the key when no URL can be composed', () => {
+    expect('video' in ser({ ...base, video: { ...video, filename: null, url: null } })).toBe(false)
+  })
+
+  it('NEVER emits null or an empty string for video', () => {
+    const out = ser({ ...base, video: { ...video, poster: 'm1' } })
+    expect(JSON.stringify(out)).not.toContain('"video"')
+  })
+
+  it('falls back to video/mp4 when mimeType is absent — the collection allows only that', () => {
+    const out = ser({ ...base, video: { ...video, mimeType: null } })
+    expect(out.video.mimeType).toBe('video/mp4')
+  })
+
+  it('does not disturb any pre-existing key when a video IS present', () => {
+    const withVideo = ser({ ...base, video })
+    const without = ser({ ...base })
+    const { video: _v, ...rest } = withVideo
+    expect(rest).toEqual(without)
+  })
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+})

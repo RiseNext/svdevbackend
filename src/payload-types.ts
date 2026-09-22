@@ -70,6 +70,7 @@ export interface Config {
     users: User;
     media: Media;
     documents: Document;
+    videos: Video;
     projects: Project;
     leads: Lead;
     testimonials: Testimonial;
@@ -94,6 +95,7 @@ export interface Config {
     users: UsersSelect<false> | UsersSelect<true>;
     media: MediaSelect<false> | MediaSelect<true>;
     documents: DocumentsSelect<false> | DocumentsSelect<true>;
+    videos: VideosSelect<false> | VideosSelect<true>;
     projects: ProjectsSelect<false> | ProjectsSelect<true>;
     leads: LeadsSelect<false> | LeadsSelect<true>;
     testimonials: TestimonialsSelect<false> | TestimonialsSelect<true>;
@@ -689,6 +691,41 @@ export interface Document {
   height?: number | null;
 }
 /**
+ * Background and feature videos. MP4 only, up to 6 MB. Recommended: H.264/AAC, 1080p, 6–10 seconds, compressed to roughly 3–5 MB, and composed so it loops cleanly — these are used as silent looping backgrounds. Where a video appears on the website is decided by the website, not here.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "videos".
+ */
+export interface Video {
+  id: string;
+  /**
+   * An internal label so this video can be recognised in the list, e.g. "Aler layout — drone approach". Not shown on the website.
+   */
+  title: string;
+  /**
+   * A still frame shown before the video plays, and whenever a device refuses to autoplay it. Use a frame from the video itself at the same aspect ratio.
+   */
+  poster: string | Media;
+  /**
+   * Display only — never used as the storage key.
+   */
+  originalFilename?: string | null;
+  uploadedBy?: (string | null) | User;
+  supersededFilenames?: string[] | null;
+  prefix?: string | null;
+  _objectKey?: string | null;
+  updatedAt: string;
+  createdAt: string;
+  deletedAt?: string | null;
+  url?: string | null;
+  thumbnailURL?: string | null;
+  filename?: string | null;
+  mimeType?: string | null;
+  filesize?: number | null;
+  width?: number | null;
+  height?: number | null;
+}
+/**
  * Enquiries from the website contact form. A lead is a COMMERCIAL RECORD — archive it, never delete it.
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -983,6 +1020,10 @@ export interface PayloadLockedDocument {
         value: string | Document;
       } | null)
     | ({
+        relationTo: 'videos';
+        value: string | Video;
+      } | null)
+    | ({
         relationTo: 'projects';
         value: string | Project;
       } | null)
@@ -1124,6 +1165,29 @@ export interface MediaSelect<T extends boolean = true> {
  */
 export interface DocumentsSelect<T extends boolean = true> {
   title?: T;
+  originalFilename?: T;
+  uploadedBy?: T;
+  supersededFilenames?: T;
+  prefix?: T;
+  _objectKey?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  deletedAt?: T;
+  url?: T;
+  thumbnailURL?: T;
+  filename?: T;
+  mimeType?: T;
+  filesize?: T;
+  width?: T;
+  height?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "videos_select".
+ */
+export interface VideosSelect<T extends boolean = true> {
+  title?: T;
+  poster?: T;
   originalFilename?: T;
   uploadedBy?: T;
   supersededFilenames?: T;
@@ -1556,6 +1620,10 @@ export interface SiteSetting {
    * The master-plan PDF offered for download on /master-plan.
    */
   masterPlan?: (string | null) | Document;
+  /**
+   * The site’s active video. Where it appears on the website is decided by the website itself — this setting only chooses which video is live. Leave empty for no video.
+   */
+  video?: (string | null) | Video;
   updatedAt?: string | null;
   createdAt?: string | null;
 }
@@ -1624,6 +1692,7 @@ export interface SiteSettingsSelect<T extends boolean = true> {
         id?: T;
       };
   masterPlan?: T;
+  video?: T;
   updatedAt?: T;
   createdAt?: T;
   globalType?: T;

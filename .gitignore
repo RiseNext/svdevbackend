@@ -28,6 +28,7 @@ next-env.d.ts
 # --- Local upload storage (dev fallback when CLOUDINARY_CLOUD_NAME is unset) -
 /media/
 /documents/
+/videos/
 
 # `upload.useTempFiles: true` streams every uploaded file through
 # `tempFileDir` (payload.config.ts -> ../.tmp/uploads) before the guard runs.

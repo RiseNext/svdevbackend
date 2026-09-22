@@ -51,12 +51,48 @@ const deliveryBase = (
  */
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif'])
 
-export const resourceTypeFor = (filename: string): 'image' | 'raw' => {
+/**
+ * 🔴 VIDEO IS A THIRD RESOURCE TYPE, NOT A VARIANT OF `raw` — MEASURED, NOT
+ * ASSUMED.
+ *
+ * `.mp4` used to fall through this function to `raw`, because `raw` was the
+ * catch-all. That is not a harmless default, and it was verified against the
+ * real Cloudinary account before this line was written:
+ *
+ *     .../video/upload/videos/<uuid>.mp4   -> 200
+ *     .../raw/upload/videos/<uuid>.mp4     -> 404
+ *     .../image/upload/videos/<uuid>.mp4   -> 404
+ *
+ * So without this branch every video URL the serialiser emits would 404. Worse
+ * and quieter: `handleDelete` derives its `resource_type` from this SAME
+ * function, so a delete issued as `raw` against a `video` asset answers
+ * "not found" and the object leaks in Cloudinary with NO error anywhere.
+ * Upload and delete must agree, and they agree because they share this function.
+ *
+ * ⚠️ THE TWO EXISTING MAPPINGS ARE UNCHANGED, AND THAT IS THE POINT. The
+ * `IMAGE_EXTENSIONS` set is untouched and `raw` remains the fallback, so jpg /
+ * jpeg / png / webp / avif still resolve to `image` and pdf still resolves to
+ * `raw`. `mp4` was not accepted by ANY collection before this change, so no
+ * existing stored asset can change resource type. A dedicated no-regression
+ * test pins all seven extensions.
+ */
+const VIDEO_EXTENSIONS = new Set(['mp4'])
+
+export const resourceTypeFor = (filename: string): 'image' | 'video' | 'raw' => {
   const ext = filename.split('.').pop()?.toLowerCase() ?? ''
-  return IMAGE_EXTENSIONS.has(ext) ? 'image' : 'raw'
+  if (IMAGE_EXTENSIONS.has(ext)) return 'image'
+  if (VIDEO_EXTENSIONS.has(ext)) return 'video'
+  return 'raw'
 }
 
-/** `media/3f2b….jpg` -> `media/3f2b…` for images, unchanged for raw. */
+/**
+ * `media/3f2b….jpg` -> `media/3f2b…` for images AND video, unchanged for raw.
+ *
+ * Cloudinary's upload reference is explicit and covers both in one sentence:
+ * *"The public ID value for images and videos shouldn't include a file
+ * extension. Include the file extension for `raw` files only."* Video therefore
+ * follows the IMAGE rule here, not the raw one.
+ */
 export const publicIdFor = (storageFilePath: string): string => {
   if (resourceTypeFor(storageFilePath) === 'raw') return storageFilePath
   return storageFilePath.replace(/\.[^./]+$/, '')

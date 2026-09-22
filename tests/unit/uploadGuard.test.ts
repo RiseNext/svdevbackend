@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 
-import { documentUploadGuard, imageUploadGuard } from '@/hooks/uploadGuard'
+import { documentUploadGuard, imageUploadGuard, videoUploadGuard } from '@/hooks/uploadGuard'
 
 /**
  * THE TEST THAT WAS MISSING — AND WHOSE ABSENCE COST THE WHOLE FEATURE.
@@ -181,5 +181,126 @@ describe('uploadGuard — documents keep streaming from disk', () => {
     await expect(
       run(documentUploadGuard, await tempShape(png, 'image/png', 'x.png')),
     ).rejects.toThrow(/not allowed|not a valid PDF/i)
+  })
+})
+
+/**
+ * VIDEO — the same non-re-encoded path as PDFs, with a tighter ceiling.
+ *
+ * ⚠️ THE FIXTURE IS A STRUCTURALLY VALID CONTAINER, NOT A PLAYABLE VIDEO, and
+ * that is the right fixture for THIS file. The guard's entire job is byte
+ * inspection: sniff the `ftyp` box, match the allow-list, compare against the
+ * declared type, enforce the ceiling, rename. None of that decodes a frame, and
+ * committing a real multi-megabyte MP4 to the repository to prove a rename
+ * would be the wrong trade. Real end-to-end playability — delivery, content
+ * type, range requests, seeking — was verified against the live Cloudinary
+ * account with a real H.264/AAC file before any of this code was written.
+ */
+const makeMp4 = (padding = 0): Buffer =>
+  Buffer.concat([
+    // ftyp box: size 0x20, major brand isom, compatible brands.
+    Buffer.from([0, 0, 0, 0x20]),
+    Buffer.from('ftyp'),
+    Buffer.from('isom'),
+    Buffer.from([0, 0, 2, 0]),
+    Buffer.from('isom'),
+    Buffer.from('iso2'),
+    Buffer.from('avc1'),
+    Buffer.from('mp41'),
+    // mdat box, optionally padded so a case can exceed the size ceiling.
+    Buffer.from([0, 0, 0, 8]),
+    Buffer.from('mdat'),
+    Buffer.alloc(padding),
+  ])
+
+describe('uploadGuard — video takes the document path, never the sharp path', () => {
+  it('accepts an MP4, renames it to a UUID and preserves the original name', async () => {
+    const mp4 = makeMp4()
+    const { file, context } = await run(videoUploadGuard, await tempShape(mp4, 'video/mp4', 'Drone Shot FINAL.mp4'))
+
+    expect(file.name).toMatch(/^[0-9a-f-]{36}\.mp4$/)
+    expect(file.name).not.toContain('Drone')
+    expect(context.originalFilename).toBe('Drone Shot FINAL.mp4')
+  })
+
+  it('leaves tempFilePath intact so the adapter STREAMS rather than buffers', async () => {
+    const mp4 = makeMp4()
+    const file = await tempShape(mp4, 'video/mp4', 'clip.mp4')
+    const tempPath = file.tempFilePath!
+
+    const { file: after } = await run(videoUploadGuard, file)
+
+    // This is what routes the upload through `uploadFromPath` in the adapter.
+    // If it were disowned, the adapter would fall through to the empty-buffer
+    // branch and Cloudinary would answer "Empty file" — the exact PDF outage.
+    expect(after.tempFilePath).toBe(tempPath)
+    expect((await readFile(tempPath)).byteLength).toBe(mp4.byteLength)
+  })
+
+  it('does NOT re-encode — the stored bytes are the uploaded bytes', async () => {
+    const mp4 = makeMp4(128)
+    const file = await tempShape(mp4, 'video/mp4', 'clip.mp4')
+    const { file: after } = await run(videoUploadGuard, file)
+    expect((await readFile(after.tempFilePath!)).equals(mp4)).toBe(true)
+  })
+
+  it('also works in the in-memory buffer shape', async () => {
+    const { file } = await run(videoUploadGuard, bufferShape(makeMp4(), 'video/mp4', 'clip.mp4'))
+    expect(file.name).toMatch(/^[0-9a-f-]{36}\.mp4$/)
+  })
+
+  it('rejects a video over the 6 MB ceiling', async () => {
+    const tooBig = makeMp4(6 * 1024 * 1024 + 1)
+    await expect(
+      run(videoUploadGuard, await tempShape(tooBig, 'video/mp4', 'huge.mp4')),
+    ).rejects.toThrow(/The limit is 6 MB/i)
+  })
+
+  it('rejects a JPEG renamed to .mp4 (declared-vs-actual mismatch)', async () => {
+    const jpeg = await makeImage('jpeg')
+    await expect(
+      run(videoUploadGuard, await tempShape(jpeg, 'video/mp4', 'fake.mp4')),
+    ).rejects.toThrow(/not allowed|do not match/i)
+  })
+
+  it('rejects an executable renamed to .mp4', async () => {
+    // A DOS/PE header — the classic "renamed binary" case.
+    const exe = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(1024, 0x41)])
+    await expect(
+      run(videoUploadGuard, await tempShape(exe, 'video/mp4', 'payload.mp4')),
+    ).rejects.toThrow(/not allowed|Unrecognised|do not match/i)
+  })
+
+  it('rejects an SVG renamed to .mp4, with the SVG message', async () => {
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+    await expect(
+      run(videoUploadGuard, await tempShape(svg, 'video/mp4', 'x.mp4')),
+    ).rejects.toThrow(/SVG files cannot be uploaded/i)
+  })
+
+  it('rejects HTML markup smuggled as a video', async () => {
+    const html = Buffer.from('<!doctype html><html><body><script>alert(1)</script></body></html>')
+    await expect(
+      run(videoUploadGuard, await tempShape(html, 'video/mp4', 'x.mp4')),
+    ).rejects.toThrow(/web markup|not allowed|Unrecognised/i)
+  })
+
+  it('rejects a PDF posted to the video collection', async () => {
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n%%EOF\n')
+    await expect(
+      run(videoUploadGuard, await tempShape(pdf, 'application/pdf', 'x.pdf')),
+    ).rejects.toThrow(/not allowed/i)
+  })
+
+  it('rejects an MP4 posted to the IMAGE collection — the reverse direction', async () => {
+    await expect(
+      run(imageUploadGuard, await tempShape(makeMp4(), 'video/mp4', 'x.mp4')),
+    ).rejects.toThrow(/not allowed/i)
+  })
+
+  it('rejects an MP4 posted to the DOCUMENT collection', async () => {
+    await expect(
+      run(documentUploadGuard, await tempShape(makeMp4(), 'video/mp4', 'x.mp4')),
+    ).rejects.toThrow(/not allowed/i)
   })
 })

@@ -75,6 +75,26 @@ export const storagePlugin = cloudStoragePlugin({
       adapter: cloudinaryEnabled ? cloudinaryAdapter : null,
       disablePayloadAccessControl: true,
     },
+    /**
+     * `videos` — the SAME adapter, the SAME credentials, the SAME options.
+     *
+     * Deliberately not a second Cloudinary client and not a second credential
+     * set: `cloudinaryAdapter` derives its resource type from the FILE
+     * EXTENSION via `resourceTypeFor`, so registering the collection here is
+     * genuinely all that is required for video to upload, delete and resolve
+     * correctly.
+     *
+     * `disablePayloadAccessControl: true` for the same reason as the other two:
+     * without it every video URL would route through the Next.js server, which
+     * proxies Cloudinary — latency, double egress, and it defeats the
+     * separate-origin requirement. Correct here because a background video is
+     * public marketing content by construction.
+     */
+    videos: {
+      prefix: 'videos',
+      adapter: cloudinaryEnabled ? cloudinaryAdapter : null,
+      disablePayloadAccessControl: true,
+    },
     documents: {
       prefix: 'documents',
       // 🔶 OQ-18 FORK. Public brochures -> `true` (CDN-served, no access

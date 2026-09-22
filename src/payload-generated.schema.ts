@@ -381,6 +381,78 @@ export const documents_texts = pgTable(
   ],
 );
 
+export const videos = pgTable(
+  "videos",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: varchar("title").notNull(),
+    poster: uuid("poster_id")
+      .notNull()
+      .references(() => media.id, {
+        onDelete: "set null",
+      }),
+    originalFilename: varchar("original_filename"),
+    uploadedBy: uuid("uploaded_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    prefix: varchar("prefix").default("videos"),
+    _objectKey: varchar("_objectkey"),
+    updatedAt: timestamp("updated_at", {
+      mode: "string",
+      withTimezone: true,
+      precision: 3,
+    })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", {
+      mode: "string",
+      withTimezone: true,
+      precision: 3,
+    })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp("deleted_at", {
+      mode: "string",
+      withTimezone: true,
+      precision: 3,
+    }),
+    url: varchar("url"),
+    thumbnailURL: varchar("thumbnail_u_r_l"),
+    filename: varchar("filename"),
+    mimeType: varchar("mime_type"),
+    filesize: numeric("filesize", { mode: "number" }),
+    width: numeric("width", { mode: "number" }),
+    height: numeric("height", { mode: "number" }),
+  },
+  (columns) => [
+    index("videos_poster_idx").on(columns.poster),
+    index("videos_uploaded_by_idx").on(columns.uploadedBy),
+    index("videos_updated_at_idx").on(columns.updatedAt),
+    index("videos_created_at_idx").on(columns.createdAt),
+    index("videos_deleted_at_idx").on(columns.deletedAt),
+    uniqueIndex("videos_filename_idx").on(columns.filename),
+  ],
+);
+
+export const videos_texts = pgTable(
+  "videos_texts",
+  {
+    id: serial("id").primaryKey(),
+    order: integer("order").notNull(),
+    parent: uuid("parent_id").notNull(),
+    path: varchar("path").notNull(),
+    text: varchar("text"),
+  },
+  (columns) => [
+    index("videos_texts_order_parent").on(columns.order, columns.parent),
+    foreignKey({
+      columns: [columns["parent"]],
+      foreignColumns: [videos.id],
+      name: "videos_texts_parent_fk",
+    }).onDelete("cascade"),
+  ],
+);
+
 export const proj_stats = pgTable(
   "proj_stats",
   {
@@ -1459,6 +1531,7 @@ export const payload_locked_documents_rels = pgTable(
     usersID: uuid("users_id"),
     mediaID: uuid("media_id"),
     documentsID: uuid("documents_id"),
+    videosID: uuid("videos_id"),
     projectsID: uuid("projects_id"),
     leadsID: uuid("leads_id"),
     testimonialsID: uuid("testimonials_id"),
@@ -1475,6 +1548,7 @@ export const payload_locked_documents_rels = pgTable(
     index("payload_locked_documents_rels_documents_id_idx").on(
       columns.documentsID,
     ),
+    index("payload_locked_documents_rels_videos_id_idx").on(columns.videosID),
     index("payload_locked_documents_rels_projects_id_idx").on(
       columns.projectsID,
     ),
@@ -1508,6 +1582,11 @@ export const payload_locked_documents_rels = pgTable(
       columns: [columns["documentsID"]],
       foreignColumns: [documents.id],
       name: "payload_locked_documents_rels_documents_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [columns["videosID"]],
+      foreignColumns: [videos.id],
+      name: "payload_locked_documents_rels_videos_fk",
     }).onDelete("cascade"),
     foreignKey({
       columns: [columns["projectsID"]],
@@ -1708,6 +1787,9 @@ export const site_settings = pgTable(
     masterPlan: uuid("master_plan_id").references(() => documents.id, {
       onDelete: "set null",
     }),
+    video: uuid("video_id").references(() => videos.id, {
+      onDelete: "set null",
+    }),
     updatedAt: timestamp("updated_at", {
       mode: "string",
       withTimezone: true,
@@ -1722,6 +1804,7 @@ export const site_settings = pgTable(
   (columns) => [
     index("site_settings_logo_idx").on(columns.logo),
     index("site_settings_master_plan_idx").on(columns.masterPlan),
+    index("site_settings_video_idx").on(columns.video),
   ],
 );
 
@@ -1834,6 +1917,9 @@ export const _site_settings_v = pgTable(
         onDelete: "set null",
       },
     ),
+    version_video: uuid("version_video_id").references(() => videos.id, {
+      onDelete: "set null",
+    }),
     version_updatedAt: timestamp("version_updated_at", {
       mode: "string",
       withTimezone: true,
@@ -1863,6 +1949,9 @@ export const _site_settings_v = pgTable(
     index("_site_settings_v_version_version_logo_idx").on(columns.version_logo),
     index("_site_settings_v_version_version_master_plan_idx").on(
       columns.version_masterPlan,
+    ),
+    index("_site_settings_v_version_version_video_idx").on(
+      columns.version_video,
     ),
     index("_site_settings_v_created_at_idx").on(columns.createdAt),
     index("_site_settings_v_updated_at_idx").on(columns.updatedAt),
@@ -1955,6 +2044,28 @@ export const relations_documents = relations(documents, ({ one, many }) => ({
     relationName: "uploadedBy",
   }),
   _texts: many(documents_texts, {
+    relationName: "_texts",
+  }),
+}));
+export const relations_videos_texts = relations(videos_texts, ({ one }) => ({
+  parent: one(videos, {
+    fields: [videos_texts.parent],
+    references: [videos.id],
+    relationName: "_texts",
+  }),
+}));
+export const relations_videos = relations(videos, ({ one, many }) => ({
+  poster: one(media, {
+    fields: [videos.poster],
+    references: [media.id],
+    relationName: "poster",
+  }),
+  uploadedBy: one(users, {
+    fields: [videos.uploadedBy],
+    references: [users.id],
+    relationName: "uploadedBy",
+  }),
+  _texts: many(videos_texts, {
     relationName: "_texts",
   }),
 }));
@@ -2296,6 +2407,11 @@ export const relations_payload_locked_documents_rels = relations(
       references: [documents.id],
       relationName: "documents",
     }),
+    videosID: one(videos, {
+      fields: [payload_locked_documents_rels.videosID],
+      references: [videos.id],
+      relationName: "videos",
+    }),
     projectsID: one(projects, {
       fields: [payload_locked_documents_rels.projectsID],
       references: [projects.id],
@@ -2422,6 +2538,11 @@ export const relations_site_settings = relations(
       references: [documents.id],
       relationName: "masterPlan",
     }),
+    video: one(videos, {
+      fields: [site_settings.video],
+      references: [videos.id],
+      relationName: "video",
+    }),
     _texts: many(site_settings_texts, {
       relationName: "_texts",
     }),
@@ -2489,6 +2610,11 @@ export const relations__site_settings_v = relations(
       references: [documents.id],
       relationName: "version_masterPlan",
     }),
+    version_video: one(videos, {
+      fields: [_site_settings_v.version_video],
+      references: [videos.id],
+      relationName: "version_video",
+    }),
     _texts: many(_site_settings_v_texts, {
       relationName: "_texts",
     }),
@@ -2523,6 +2649,8 @@ type DatabaseSchema = {
   media_texts: typeof media_texts;
   documents: typeof documents;
   documents_texts: typeof documents_texts;
+  videos: typeof videos;
+  videos_texts: typeof videos_texts;
   proj_stats: typeof proj_stats;
   proj_highlights: typeof proj_highlights;
   proj_approvals: typeof proj_approvals;
@@ -2574,6 +2702,8 @@ type DatabaseSchema = {
   relations_media: typeof relations_media;
   relations_documents_texts: typeof relations_documents_texts;
   relations_documents: typeof relations_documents;
+  relations_videos_texts: typeof relations_videos_texts;
+  relations_videos: typeof relations_videos;
   relations_proj_stats: typeof relations_proj_stats;
   relations_proj_highlights: typeof relations_proj_highlights;
   relations_proj_approvals: typeof relations_proj_approvals;

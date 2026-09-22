@@ -39,6 +39,10 @@ export const resetTestDatabase = async (payload: Payload): Promise<void> => {
     'testimonials',
     'faqs',
     'statistics',
+    // `videos` before `media`: it holds an FK to it (poster). CASCADE would
+    // reach it anyway, but listing children first is the rule this array
+    // already follows.
+    'videos',
     'media',
     'documents',
   ]

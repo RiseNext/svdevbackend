@@ -153,6 +153,28 @@ export const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 export const MAX_IMAGE_SIDE_PX = 10_000
 
 /**
+ * 🔴 6 MB, AND THE NUMBER IS A BANDWIDTH DECISION, NOT A TECHNICAL LIMIT.
+ *
+ * Cloudinary's own `media_limits` on this account allow 100 MB per video, and
+ * `upload.limits.fileSize` in payload.config.ts is the 25 MB PDF ceiling — so
+ * anything up to 25 MB would upload without a single config change. The binding
+ * constraint is the delivery budget: a video used as a looping background
+ * autoplays, so it is fetched on essentially every visit to whatever page
+ * renders it. At 6 MB that is roughly twice the monthly traffic the current
+ * plan sustains compared with 12 MB.
+ *
+ * ⚠️ IT MUST STAY <= MAX_DOCUMENT_BYTES. `upload.limits.fileSize` is ONE
+ * application-wide value; raising this above 25 MB would mean raising that, and
+ * that would silently relax the ceiling for images and PDFs too.
+ *
+ * Duration and pixel dimensions are NOT enforced: sharp cannot read an MP4 and
+ * this project deliberately ships no ffmpeg/ffprobe. The byte ceiling is the
+ * only technical control, which is why it is deliberately tight and why the
+ * collection carries explicit authoring guidance.
+ */
+export const MAX_VIDEO_BYTES = 6 * 1024 * 1024
+
+/**
  * Our allow-list is STRICTLY NARROWER than Payload's own restricted-type
  * deny-list, which is the only reason it is acceptable that defining `mimeTypes`
  * causes Payload to SKIP its restricted-file verification entirely.
@@ -170,6 +192,32 @@ export const ALLOWED_IMAGE_MIME = {
 
 export const ALLOWED_DOCUMENT_MIME = {
   'application/pdf': 'pdf',
+} as const
+
+/**
+ * MP4 ONLY, AND WEBM IS DELIBERATELY DEFERRED.
+ *
+ * H.264/AAC in MP4 plays in every browser in the target set, Safari and iOS
+ * included, so nothing needs a second file to play the video at all. Adding
+ * WebM now would cost a second upload per asset, a `<source>` list on the
+ * frontend (which would change the shape the existing Hero already accepts),
+ * and double the storage and orphan-cleanup surface — in exchange for a
+ * marginal size win on browsers that already play the MP4.
+ *
+ * The public contract emits `mimeType`, which is the forward hook: adding a
+ * second format later is additive on both sides rather than breaking.
+ *
+ * 🔴 SAME RE-REVIEW RULE AS THE TWO LISTS ABOVE. Defining `mimeTypes` on a
+ * collection makes Payload SKIP its restricted-file verification, so this list
+ * must stay strictly narrower than their deny-list. `video/mp4` is not on it —
+ * that list covers executables, scripts and HTML.
+ *
+ * ⚠️ The sniffer must match `video/mp4` EXACTLY. Sibling ISO-BMFF brands
+ * (.m4v, .mov, .3gp) share the `ftyp` box and must fail the allow-list rather
+ * than be coerced into it.
+ */
+export const ALLOWED_VIDEO_MIME = {
+  'video/mp4': 'mp4',
 } as const
 
 // ---------------------------------------------------------------------------
