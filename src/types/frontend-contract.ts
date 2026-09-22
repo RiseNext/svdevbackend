@@ -96,6 +96,10 @@ export type Project = {
   locationMap?: ImageRef;
   /** Scanned brochure pages, offered as supporting documents. */
   brochureImages?: readonly ImageRef[];
+  /** Downloadable brochure PDF, when the project has one attached. `href` is an
+   *  absolute CDN URL, so it is rendered as an external download rather than a
+   *  route. Distinct from `brochureImages`, which is page SCANS. */
+  brochure?: { title: string; href: string };
   /** Overrides the shared CTA banner copy for this project. */
   cta?: { title: string; description: string };
   /** Overrides the generated SEO title/description. */

@@ -236,16 +236,44 @@ describe('projects.brochure references the existing documents collection', () =>
   })
 })
 
-describe('projects.brochure is NOT in the public contract yet', () => {
-  it('PUBLIC_PROJECT_SELECT does not request it', () => {
-    expect(Object.keys(PUBLIC_PROJECT_SELECT)).not.toContain('brochure')
+describe('projects.brochure in the public contract', () => {
+  it('PUBLIC_PROJECT_SELECT requests it, so the relation populates', () => {
+    // Without this the serialiser receives a bare id and the website's download
+    // link silently never appears.
+    expect(Object.keys(PUBLIC_PROJECT_SELECT)).toContain('brochure')
   })
 
-  it('toPublicProject() emits no brochure key, even when one is set', async () => {
+  it('emits { title, href } when a brochure is attached', async () => {
     const created = await payload.create({
       collection: 'projects',
       overrideAccess: true,
-      data: { ...baseProject('brochure-not-public'), brochure: brochureId, _status: 'published' },
+      data: { ...baseProject('brochure-public'), brochure: brochureId, _status: 'published' },
+      context: CTX,
+    })
+    const full = await payload.findByID({
+      collection: 'projects',
+      id: created.id,
+      depth: 2,
+      overrideAccess: true,
+    })
+
+    const publicShape = toPublicProject(full as never)
+    const brochure = publicShape.brochure
+
+    expect(brochure, 'brochure must be emitted when set').toBeDefined()
+    // EXACTLY two keys — the contract declares both required inside the object.
+    expect(Object.keys(brochure!).sort()).toEqual(['href', 'title'])
+    expect(brochure!.title).toBe('Project brochure (PDF)')
+    expect(brochure!.href).toMatch(/\.pdf$/)
+    expect(brochure!.href.length).toBeGreaterThan(0)
+  })
+
+  it('OMITS the key entirely when no brochure is attached', async () => {
+    // The omit rule: absent optionals are omitted, never null/''/{}.
+    const created = await payload.create({
+      collection: 'projects',
+      overrideAccess: true,
+      data: { ...baseProject('brochure-public-absent'), _status: 'published' },
       context: CTX,
     })
     const full = await payload.findByID({
@@ -257,10 +285,45 @@ describe('projects.brochure is NOT in the public contract yet', () => {
 
     const publicShape = toPublicProject(full as never)
     expect('brochure' in (publicShape as Record<string, unknown>)).toBe(false)
-    // And nothing PDF-shaped leaked in under another name.
     expect(JSON.stringify(publicShape)).not.toMatch(/\.pdf/i)
-    // The fields the website does rely on are still all present.
-    expect(publicShape.slug).toBe('brochure-not-public')
+    // The fields the website already relies on are untouched.
+    expect(publicShape.slug).toBe('brochure-public-absent')
     expect(publicShape.image).toBeTruthy()
+  })
+
+  /** The minimum a Payload project doc needs for the serialiser to run, with
+   *  whatever `brochure` shape the case is probing. */
+  const docWith = (slug: string, brochure: unknown) =>
+    ({
+      slug,
+      name: slug,
+      category: 'Residential Plots',
+      locality: 'Testville',
+      summary: 'x',
+      description: ['x'],
+      highlights: [],
+      image: { url: '/a.jpg', alt: 'a', width: 1, height: 1 },
+      brochure,
+    }) as never
+
+  it('OMITS it rather than guessing when the relation is UNPOPULATED', () => {
+    // A depth-0 read gives a bare id string. Emitting a partial object here
+    // would put a download button on the site pointing at nothing.
+    const publicShape = toPublicProject(docWith('depth-zero', brochureId))
+    expect('brochure' in (publicShape as Record<string, unknown>)).toBe(false)
+  })
+
+  it('OMITS it when the document has no url yet', () => {
+    const publicShape = toPublicProject(
+      docWith('no-url', { id: brochureId, title: 'A brochure', url: null }),
+    )
+    expect('brochure' in (publicShape as Record<string, unknown>)).toBe(false)
+  })
+
+  it('OMITS it when the document has a url but no usable title', () => {
+    const publicShape = toPublicProject(
+      docWith('no-title', { id: brochureId, title: '   ', url: 'https://cdn/x.pdf', filename: '' }),
+    )
+    expect('brochure' in (publicShape as Record<string, unknown>)).toBe(false)
   })
 })

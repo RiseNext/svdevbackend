@@ -75,6 +75,40 @@ const seoOrUndefined = (
   return Object.keys(out).length ? (out as { title?: string; description?: string }) : undefined
 }
 
+/**
+ * The brochure PDF -> `{ title, href }`, or OMITTED.
+ *
+ * 🔴 BOTH-OR-NEITHER, AND FOR A CONCRETE REASON. `href` comes from the stored
+ * Cloudinary delivery URL. If the relation arrives UNPOPULATED (a bare id
+ * string, which is what a depth-0 read returns) or the document has no `url`
+ * yet, emitting a partial object would put a download button on the website
+ * pointing at nothing. The contract declares both members required inside the
+ * optional object, so the only honest options are a complete pair or absence.
+ *
+ * ⚠️ The populated shape is pinned by `documents.defaultPopulate`
+ * (`{ filename, url, title }`), which is exactly the two values needed — so this
+ * needs no extra query and no depth change.
+ *
+ * `title` falls back to the filename only if a document somehow has none;
+ * `documents.title` is `required: true`, so that is defence, not expectation.
+ */
+const brochureOrUndefined = (
+  brochure: PayloadProject['brochure'],
+): { title: string; href: string } | undefined => {
+  // A bare id means the relation was not populated — never guess a URL from it.
+  if (!brochure || typeof brochure !== 'object') return undefined
+
+  const href = typeof brochure.url === 'string' ? brochure.url.trim() : ''
+  if (!href) return undefined
+
+  const title =
+    (typeof brochure.title === 'string' ? brochure.title.trim() : '') ||
+    (typeof brochure.filename === 'string' ? brochure.filename.trim() : '')
+  if (!title) return undefined
+
+  return { title, href }
+}
+
 /** Both-or-neither, enforced at the field level too. */
 const ctaOrUndefined = (
   cta: PayloadProject['cta'],
@@ -132,9 +166,11 @@ export const toPublicProject = (doc: PayloadProject): PublicProject => {
 
   put(out, 'cta', ctaOrUndefined(doc.cta))
   put(out, 'seo', seoOrUndefined(doc.seo))
+  put(out, 'brochure', brochureOrUndefined(doc.brochure))
 
   // `brochureImages` is deliberately absent from the model entirely — zero
-  // render sites, 0/5 populated.
+  // render sites, 0/5 populated. It is page SCANS AS IMAGES and is NOT the
+  // `brochure` PDF emitted above; the two are different artefacts.
 
   return out as unknown as PublicProject
 }
@@ -204,4 +240,8 @@ export const PUBLIC_PROJECT_SELECT = {
   locationMap: true,
   cta: true,
   seo: true,
+  // The brochure PDF. Selected so `defaultPopulate` on `documents` resolves
+  // `{ filename, url, title }`; omitting it here would hand the serialiser a
+  // bare id and the download link would silently never appear.
+  brochure: true,
 } as const
