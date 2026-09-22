@@ -1,3 +1,5 @@
+import { createReadStream } from 'node:fs'
+
 import { v2 as cloudinary, type UploadApiOptions, type UploadApiResponse } from 'cloudinary'
 import type { Adapter, GeneratedAdapter } from '@payloadcms/plugin-cloud-storage/types'
 
@@ -62,6 +64,51 @@ const uploadBuffer = (buffer: Buffer, options: UploadApiOptions): Promise<Upload
     stream.end(buffer)
   })
 
+/**
+ * The SAME upload, sourced from a temp file on disk instead of a buffer.
+ *
+ * 🔴 WHY THIS EXISTS — THE `documents` (PDF) UPLOAD FAILURE.
+ * With `useTempFiles: true` the bytes arrive at `file.tempFilePath` and
+ * `file.data` is an EMPTY Buffer. `media` never hits that case, because the
+ * upload guard re-encodes every image and hands the sanitised bytes back as
+ * `file.data` (`adoptSanitisedBytes`). A PDF is deliberately NOT re-encoded —
+ * the guard's document branch renames it and returns — so for `documents`
+ * `file.data` stays empty all the way through:
+ *
+ *   · `generateFileData.js:292` sets
+ *     `skipTempFileBuffer = disableLocalStorage && tempFilePath && !fileBuffer?.data`,
+ *     which is TRUE once Cloudinary is enabled, so Payload deliberately does not
+ *     buffer the file and never reassigns `req.file`.
+ *   · `plugin-cloud-storage/utilities/getIncomingFiles.js` then builds
+ *     `{ buffer: file.data, tempFilePath: file.tempFilePath }` — i.e. an EMPTY
+ *     buffer alongside the real bytes on disk.
+ *   · uploading that empty buffer made Cloudinary answer `Empty file` (400),
+ *     which the plugin's afterChange hook rethrows as a 500:
+ *     "There was an error while uploading files corresponding to the collection
+ *      documents with filename <uuid>.pdf".
+ *
+ * `tempFilePath` is a FIRST-CLASS, TYPED field on the plugin's file type
+ * (`plugin-cloud-storage/types.d.ts`) precisely so an adapter can do this.
+ *
+ * Streaming rather than reading into memory is deliberate: PDFs are the 25 MB
+ * ceiling and `useTempFiles` exists "so large files are not buffered in RAM"
+ * (MASTER-IMPLEMENTATION-PLAN.md §5621). This keeps that control intact.
+ */
+const uploadFromPath = (
+  tempFilePath: string,
+  options: UploadApiOptions,
+): Promise<UploadApiResponse> =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
+      if (error) return reject(error)
+      if (!result) return reject(new Error('Cloudinary returned no result for the upload.'))
+      resolve(result)
+    })
+    const source = createReadStream(tempFilePath)
+    source.on('error', reject)
+    source.pipe(stream)
+  })
+
 export const cloudinaryAdapter: Adapter = (): GeneratedAdapter => ({
   name: 'cloudinary',
 
@@ -71,7 +118,7 @@ export const cloudinaryAdapter: Adapter = (): GeneratedAdapter => ({
    * and the delivery URL are all derived from ONE value.
    */
   handleUpload: async ({ file, storageFilePath }) => {
-    await uploadBuffer(file.buffer, {
+    const options: UploadApiOptions = {
       public_id: publicIdFor(storageFilePath),
       resource_type: resourceTypeFor(storageFilePath),
 
@@ -93,7 +140,28 @@ export const cloudinaryAdapter: Adapter = (): GeneratedAdapter => ({
       // Belt and braces with the UUID rename: the uploader's original filename
       // must never reach Cloudinary's metadata, let alone a URL.
       discard_original_filename: true,
-    })
+    }
+
+    // ---------------------------------------------------------------------
+    // TWO SOURCES, ONE UPLOAD. The buffer branch is the EXISTING, PRODUCTION-
+    // PROVEN `media` path and is checked FIRST, so nothing about image upload
+    // changes: the guard always hands images back with a populated `file.data`
+    // and `tempFilePath` cleared, so `media` can never reach the second branch.
+    // The temp-file branch is reached only by `documents`, where the bytes are
+    // deliberately left on disk. See `uploadFromPath` above.
+    // ---------------------------------------------------------------------
+    if (Buffer.isBuffer(file.buffer) && file.buffer.byteLength > 0) {
+      await uploadBuffer(file.buffer, options)
+    } else if (typeof file.tempFilePath === 'string' && file.tempFilePath !== '') {
+      await uploadFromPath(file.tempFilePath, options)
+    } else {
+      // Never silently upload nothing — that is precisely the failure this
+      // branch exists to end, and Cloudinary's own "Empty file" said nothing
+      // about which collection or which representation was missing.
+      throw new Error(
+        `Cloudinary upload for "${storageFilePath}" has no bytes: file.buffer is empty and no tempFilePath was provided.`,
+      )
+    }
 
     // Returning nothing is deliberate. An adapter MAY return metadata, which the
     // plugin then writes back with a second `payload.update` — but every field it
