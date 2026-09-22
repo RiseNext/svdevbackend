@@ -34,70 +34,111 @@ export type PublicSiteSettings = {
   heroTicker?: { icon: string; text: string }[]
   logo?: ImageRef
   masterPlan?: { title: string; href: string }
-  /** The site's ACTIVE video, if one is configured. Placement-neutral: this
-   *  says which video is live, never where it is rendered. */
-  video?: VideoRef
+  /**
+   * The site's ACTIVE videos, IN ADMIN ORDER.
+   *
+   * 🔴 `VideoRef` declares `poster` and `title` OPTIONAL, but this serialiser
+   * ALWAYS emits both — an entry missing either is dropped rather than
+   * emitted partially. The optionality belongs to the frontend's type (it also
+   * accepts videos from a local preview folder in development, where a poster
+   * may genuinely be absent); from the CMS both are guaranteed, because
+   * `videos.title` and `videos.poster` are `required: true`. Emitting a
+   * narrower, fully-populated shape than the contract permits is always safe;
+   * the reverse is not.
+   */
+  heroVideos?: VideoRef[]
 }
 
-/**
- * The active video -> `{ src, mimeType, poster }`, or OMITTED.
- *
- * 🔴 BOTH-OR-NEITHER, AND EVERY BRANCH HERE IS A REAL CASE.
- * A partial object would put an autoplaying `<video>` on the website pointing
- * at nothing, or one with no poster on a device that refuses to autoplay —
- * i.e. a blank hero. The only honest outputs are a complete object or absence.
- *
- * 🔴 IT OMITS RATHER THAN THROWS, WHICH IS A DELIBERATE DEPARTURE FROM
- * `toImageRef`. That function throws on an unpopulated relation because a
- * project's cover image is REQUIRED — a broken one must fail loudly. The video
- * is OPTIONAL, and `site-settings` feeds every page on the site: a throw here
- * would turn "the video relation was not populated" into a 500 on the endpoint
- * that renders the header, the footer and the contact details of every page.
- * Omission degrades to "no video", which is a designed state the frontend
- * already handles.
- *
- * 🔴 `src` IS COMPOSED DETERMINISTICALLY, NEVER READ FROM `url`. This is the
- * same rule `toImageRef` and `buildDocumentHref` already follow, and ignoring
- * it is what put a 404 in production on brochure links: `url` on an upload
- * collection is a VIRTUAL field recomputed from `{ filename, prefix }` at
- * population time, and `prefix` is not in `defaultPopulate`, so it composes
- * WITHOUT the folder. `cloudinaryFileUrl` is the same function the storage
- * adapter's `generateURL` calls, so what Payload persists and what this emits
- * cannot drift. The `url` fallback is retained only for LOCAL DEVELOPMENT,
- * where Cloudinary is deliberately unconfigured and files are served from disk.
- */
-const videoOrUndefined = (video: SiteSetting['video']): VideoRef | undefined => {
+/** One populated `videos` document -> `{ src, poster, title }`, or `undefined`
+ *  when it cannot be fully resolved. See `heroVideosOrUndefined` below. */
+const toVideoRef = (video: unknown): VideoRef | undefined => {
   // A bare id string means the relation was not populated deeply enough.
   // Never guess a URL from an id.
   if (!video || typeof video !== 'object') return undefined
+  const doc = video as {
+    filename?: unknown
+    url?: unknown
+    title?: unknown
+    poster?: unknown
+  }
 
-  const filename = typeof video.filename === 'string' ? video.filename.trim() : ''
-  const src = (filename ? cloudinaryFileUrl('videos', filename) : undefined) ?? video.url ?? ''
+  const filename = typeof doc.filename === 'string' ? doc.filename.trim() : ''
+  const src =
+    (filename ? cloudinaryFileUrl('videos', filename) : undefined) ??
+    (typeof doc.url === 'string' ? doc.url : '')
   if (!src) return undefined
 
-  // The poster is REQUIRED on the collection, but "required" is a WRITE
-  // constraint — it says nothing about whether the relation arrived populated
-  // on this particular read. A bare id here means the query depth was too
-  // shallow, so the whole object is omitted rather than emitting a video the
-  // frontend cannot show a still for.
-  if (!video.poster || typeof video.poster !== 'object') return undefined
+  // `videos.title` is `required: true`, so an absent one means a malformed or
+  // partially-selected read rather than an editorial choice. The frontend
+  // types it optional because its DEVELOPMENT preview source may lack one;
+  // from the CMS it is guaranteed, so a missing title drops the entry rather
+  // than emitting a slide the carousel can only announce as "Video 2 of 3".
+  const title = typeof doc.title === 'string' ? doc.title.trim() : ''
+  if (!title) return undefined
+
+  // 🔴 POSTER IS A PLAIN URL STRING HERE, NOT AN ImageRef — the frontend types
+  // it `poster?: string` and passes it straight to `<video poster={...}>`.
+  // `toImageRef` is still what BUILDS it, so the poster URL is composed by the
+  // same proven path as every other image on the site; only `.src` is taken.
+  // `poster` is `required: true` on the collection, so a bare id here means the
+  // read was too shallow — drop the entry rather than emit a video with no
+  // still frame, which is all a metered or autoplay-refusing device would see.
+  if (!doc.poster || typeof doc.poster !== 'object') return undefined
   let poster: ImageRef
   try {
-    poster = toImageRef(video.poster, 'video.poster')
+    poster = toImageRef(doc.poster, 'heroVideos[].poster')
   } catch {
     return undefined
   }
   if (!poster.src) return undefined
 
-  return {
-    src,
-    // The collection accepts exactly one MIME type, so the fallback is a
-    // statement of fact rather than an invention. The key exists at all so that
-    // adding a second format later is additive on both sides instead of
-    // breaking the contract.
-    mimeType: video.mimeType ?? 'video/mp4',
-    poster,
+  // Exactly three keys. `mimeType` is DELIBERATELY NOT emitted: the frontend's
+  // `VideoRef` does not declare it and nothing consumes it.
+  return { src, poster: poster.src, title }
+}
+
+/**
+ * The ordered hero videos -> `[{ src, poster, title }]`, or OMITTED.
+ *
+ * 🔴 ORDER IS THE CONTRACT AND IS PRESERVED VERBATIM. `HeroVideoStage`
+ * advances with `(index + 1) % videos.length` and keys each slide by position,
+ * so the array index IS the carousel order. Payload stores a `hasMany` relation
+ * with an explicit `order` column and returns rows in that order, which means
+ * the admin's drag-to-reorder is the single source of truth. NOTHING here may
+ * sort — not by title, not by date, not by id.
+ *
+ * 🔴 PER-ENTRY BOTH-OR-NOTHING, NOT ALL-OR-NOTHING. One unresolvable video
+ * must not blank a working carousel, so a bad entry is dropped and the rest are
+ * emitted. If that leaves nothing, the KEY ITSELF IS OMITTED — never `[]`,
+ * never `null`, never a placeholder row. The frontend treats absent and empty
+ * identically, but omission is what its own spec note asks for.
+ *
+ * 🔴 DEDUPED BY `src`, KEEPING THE FIRST OCCURRENCE. Payload permits selecting
+ * the same upload twice in a `hasMany` field, and `HeroVideoStage` uses
+ * `key={video.src}` — duplicates would collide as React keys and the carousel
+ * would misbehave in a way that looks like a rendering bug rather than a data
+ * one. First-wins keeps the admin's intended position for the first mention.
+ *
+ * 🔴 IT OMITS RATHER THAN THROWS, unlike `toImageRef`. That function throws
+ * because a project cover is required and a broken one must fail loudly. Hero
+ * videos are optional, and `site-settings` feeds EVERY page — a throw here
+ * would turn "a relation was not populated" into a site-wide 500. Omission
+ * degrades to the type-only hero, which is a designed state.
+ */
+const heroVideosOrUndefined = (videos: SiteSetting['heroVideos']): VideoRef[] | undefined => {
+  if (!Array.isArray(videos) || videos.length === 0) return undefined
+
+  const out: VideoRef[] = []
+  const seen = new Set<string>()
+  for (const video of videos) {
+    const ref = toVideoRef(video)
+    if (!ref) continue
+    if (seen.has(ref.src)) continue
+    seen.add(ref.src)
+    out.push(ref)
   }
+
+  return out.length > 0 ? out : undefined
 }
 
 export const toPublicSiteSettings = (doc: SiteSetting): PublicSiteSettings => {
@@ -221,9 +262,10 @@ export const toPublicSiteSettings = (doc: SiteSetting): PublicSiteSettings => {
     }
   }
 
-  // The active video. `put` omits the key entirely when undefined, which is
-  // what makes the no-video response byte-identical to the pre-feature one.
-  put(out, 'video', videoOrUndefined(doc.video))
+  // The ordered hero videos. `put` omits the key entirely when undefined,
+  // which is what makes the no-video response byte-identical to the response
+  // this endpoint returned before the feature existed.
+  put(out, 'heroVideos', heroVideosOrUndefined(doc.heroVideos))
 
   return out as unknown as PublicSiteSettings
 }
@@ -248,10 +290,10 @@ export const PUBLIC_SITE_SETTINGS_SELECT = {
   logo: true,
   masterPlan: true,
   // Selected so `videos.defaultPopulate` resolves `{ filename, url, title,
-  // poster }`. Omitting it here would hand the serialiser a bare id and the
-  // `video` key would SILENTLY never appear — the exact failure mode that kept
-  // `projects.brochure` invisible until it was added to its own select.
-  video: true,
+  // poster }` for every row. Omitting it here would hand the serialiser bare
+  // ids and `heroVideos` would SILENTLY never appear — the exact failure mode
+  // that kept `projects.brochure` invisible until it was added to its select.
+  heroVideos: true,
 } as const
 
 // ---------------------------------------------------------------------------

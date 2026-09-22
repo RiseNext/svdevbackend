@@ -34,24 +34,31 @@ export type ImageRef = {
 };
 
 /**
- * A reusable video asset, as published by the CMS.
+ * One hero background video.
  *
- * PLACEMENT IS NOT PART OF THIS CONTRACT, DELIBERATELY. The backend answers
- * only "which video is currently active"; where — and whether — it is rendered
- * is a decision this repository owns. The same value can back a full-bleed
- * hero today and a section band later with no CMS change.
+ * 🔴 THE BACKEND DOES NOT EMIT THIS YET. `/api/v1/site-settings` currently
+ * returns ten fields and none of them is a video; `/media` and `/videos` both
+ * 404. This type is the CONTRACT the hero consumes, written so the section
+ * works the moment the field appears and renders its type-only state until
+ * then. See the note on `SiteSettings.heroVideos` for the backend spec.
  *
- * `poster` is an `ImageRef` rather than a bare URL for two reasons: it is an
- * ordinary image from the same media library as everything else, and carrying
- * its dimensions is what lets a call site use `next/image` without reflowing.
- * It is REQUIRED because a silent autoplaying video is not guaranteed to start
- * — iOS Low Power Mode, Data Saver and `prefers-reduced-motion` all refuse it —
- * and the poster is what the visitor sees when it does not.
+ * `src` MUST be served from a host already listed in `next.config.mjs`
+ * `images.remotePatterns` reasoning — i.e. the Cloudinary delivery origin in
+ * `NEXT_PUBLIC_MEDIA_BASE_URL`. `<video>` is not subject to next/image's host
+ * allowlist, so a wrong host here fails silently at runtime rather than loudly
+ * at build time. That makes it MORE dangerous than an image, not less.
  */
 export type VideoRef = {
+  /** Encoded delivery URL, e.g. `<cloudinary base>/video/upload/media/<id>.mp4`. */
   src: string;
-  mimeType: string;
-  poster: ImageRef;
+  /** Still frame shown before the first byte of video arrives, and the only
+   *  thing a user on a metered connection may ever see. Strongly preferred:
+   *  without it the container is empty until playback starts. */
+  poster?: string;
+  /** Admin-supplied label. Not rendered as body copy — it names the slide for
+   *  the carousel's controls, so screen-reader users get "Aerial approach"
+   *  rather than "Slide 2". */
+  title?: string;
 };
 
 export type ProjectStatus = 'Open for booking' | 'Nearing sell-out' | 'Completed' | 'Coming soon';

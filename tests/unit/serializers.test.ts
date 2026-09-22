@@ -400,75 +400,102 @@ describe('toPublicSiteSettings — copyrightText on an unsaved global', () => {
   })
 })
 
-describe('toPublicSiteSettings — the active video (both-or-neither)', () => {
+describe('toPublicSiteSettings — heroVideos (ordered, per-entry both-or-nothing)', () => {
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const base = {
     name: 'SV', legalName: 'SV', url: 'https://e.test',
     email: 'a@e.test', phone: '1', whatsapp: '919000000000', address: ['L'],
   }
-  const poster = {
+  const poster = (alt = 'A still') => ({
     id: 'm1', filename: 'p.jpg', url: '/local/p.jpg',
-    alt: 'A still', isDecorative: false, width: 1920, height: 1080,
-  }
-  const video = { id: 'v1', filename: 'abc.mp4', url: '/local/abc.mp4', mimeType: 'video/mp4', title: 'T', poster }
+    alt, isDecorative: false, width: 1920, height: 1080,
+  })
+  const vid = (n: string, title = `T-${n}`) => ({
+    id: `v-${n}`, filename: `${n}.mp4`, url: `/local/${n}.mp4`,
+    mimeType: 'video/mp4', title, poster: poster(),
+  })
   const ser = (doc: any) => toPublicSiteSettings(doc) as any
 
-  it('emits exactly { src, mimeType, poster } and nothing else', () => {
-    const out = ser({ ...base, video })
-    expect(Object.keys(out.video).sort()).toEqual(['mimeType', 'poster', 'src'])
-    expect(out.video.mimeType).toBe('video/mp4')
-    expect(Object.keys(out.video.poster).sort()).toEqual(['alt', 'height', 'src', 'width'])
-    expect(out.video.poster.width).toBe(1920)
-  })
-
-  it('leaks no internal field — no id, title, filesize, uploadedBy or originalFilename', () => {
-    const out = ser({
-      ...base,
-      video: { ...video, uploadedBy: 'u1', originalFilename: 'secret.mp4', filesize: 123, supersededFilenames: ['old.mp4'] },
-    })
-    const json = JSON.stringify(out.video)
-    for (const leak of ['uploadedBy', 'originalFilename', 'supersededFilenames', 'filesize', 'title', '"id"']) {
+  it('emits exactly { src, poster, title } per entry — no mimeType, no id', () => {
+    const out = ser({ ...base, heroVideos: [vid('a')] })
+    expect(Object.keys(out.heroVideos[0]).sort()).toEqual(['poster', 'src', 'title'])
+    const json = JSON.stringify(out.heroVideos)
+    for (const leak of ['mimeType', '"id"', 'uploadedBy', 'originalFilename', 'filesize']) {
       expect(json, `must not leak ${leak}`).not.toContain(leak)
     }
   })
 
-  it('OMITS the key when no video is configured', () => {
-    expect('video' in ser({ ...base })).toBe(false)
-    expect('video' in ser({ ...base, video: null })).toBe(false)
+  it('returns poster as a plain string URL, not an ImageRef', () => {
+    const out = ser({ ...base, heroVideos: [vid('a')] })
+    expect(typeof out.heroVideos[0].poster).toBe('string')
   })
 
-  it('OMITS the key when the relation is an unpopulated bare id', () => {
-    // A depth-too-shallow read. Never guess a URL from an id.
-    expect('video' in ser({ ...base, video: 'v1' })).toBe(false)
+  it('preserves input order verbatim — never sorts', () => {
+    const out = ser({ ...base, heroVideos: [vid('z', 'Zed'), vid('a', 'Ay'), vid('m', 'Em')] })
+    expect(out.heroVideos.map((v: any) => v.title)).toEqual(['Zed', 'Ay', 'Em'])
   })
 
-  it('OMITS the key when the POSTER is a bare id — the depth-1 symptom', () => {
-    expect('video' in ser({ ...base, video: { ...video, poster: 'm1' } })).toBe(false)
+  it('OMITS the key when absent, null, or an empty array', () => {
+    expect('heroVideos' in ser({ ...base })).toBe(false)
+    expect('heroVideos' in ser({ ...base, heroVideos: null })).toBe(false)
+    expect('heroVideos' in ser({ ...base, heroVideos: [] })).toBe(false)
   })
 
-  it('OMITS the key when the poster is missing entirely', () => {
-    expect('video' in ser({ ...base, video: { ...video, poster: null } })).toBe(false)
+  it('NEVER emits [] or null for heroVideos', () => {
+    const out = ser({ ...base, heroVideos: [] })
+    expect(JSON.stringify(out)).not.toContain('"heroVideos"')
   })
 
-  it('OMITS the key when no URL can be composed', () => {
-    expect('video' in ser({ ...base, video: { ...video, filename: null, url: null } })).toBe(false)
+  it('drops an entry that is an unpopulated bare id, keeping the rest', () => {
+    const out = ser({ ...base, heroVideos: [vid('a', 'Keep'), 'v-b', vid('c', 'AlsoKeep')] })
+    expect(out.heroVideos.map((v: any) => v.title)).toEqual(['Keep', 'AlsoKeep'])
   })
 
-  it('NEVER emits null or an empty string for video', () => {
-    const out = ser({ ...base, video: { ...video, poster: 'm1' } })
-    expect(JSON.stringify(out)).not.toContain('"video"')
+  it('drops an entry whose SRC cannot be composed', () => {
+    const broken = { ...vid('b', 'Broken'), filename: null, url: null }
+    const out = ser({ ...base, heroVideos: [vid('a', 'Good'), broken] })
+    expect(out.heroVideos.map((v: any) => v.title)).toEqual(['Good'])
   })
 
-  it('falls back to video/mp4 when mimeType is absent — the collection allows only that', () => {
-    const out = ser({ ...base, video: { ...video, mimeType: null } })
-    expect(out.video.mimeType).toBe('video/mp4')
+  it('drops an entry whose POSTER is missing or a bare id', () => {
+    const noPoster = { ...vid('b', 'NoPoster'), poster: null }
+    const idPoster = { ...vid('c', 'IdPoster'), poster: 'm1' }
+    const out = ser({ ...base, heroVideos: [vid('a', 'Good'), noPoster, idPoster] })
+    expect(out.heroVideos.map((v: any) => v.title)).toEqual(['Good'])
   })
 
-  it('does not disturb any pre-existing key when a video IS present', () => {
-    const withVideo = ser({ ...base, video })
+  it('drops an entry whose TITLE is missing or blank', () => {
+    const noTitle = { ...vid('b'), title: null }
+    const blank = { ...vid('c'), title: '   ' }
+    const out = ser({ ...base, heroVideos: [vid('a', 'Good'), noTitle, blank] })
+    expect(out.heroVideos.map((v: any) => v.title)).toEqual(['Good'])
+  })
+
+  it('OMITS the key entirely when every entry is invalid', () => {
+    const out = ser({ ...base, heroVideos: ['bare-id', { ...vid('b'), poster: null }] })
+    expect('heroVideos' in out).toBe(false)
+  })
+
+  it('dedupes by src, keeping the FIRST occurrence and its position', () => {
+    const a = vid('a', 'First')
+    const out = ser({ ...base, heroVideos: [a, vid('b', 'Second'), { ...a, title: 'Dup' }] })
+    expect(out.heroVideos.map((v: any) => v.title)).toEqual(['First', 'Second'])
+  })
+
+  it('does not disturb any pre-existing key when heroVideos IS present', () => {
+    const withV = ser({ ...base, heroVideos: [vid('a')] })
     const without = ser({ ...base })
-    const { video: _v, ...rest } = withVideo
+    const { heroVideos: _v, ...rest } = withV
     expect(rest).toEqual(without)
+  })
+
+  it('carries the poster alt through the existing toImageRef path (decorative -> "")', () => {
+    // Proves the poster URL is built by the SAME code that builds every other
+    // image on the site, rather than a second composition path.
+    const dec = { ...vid('a'), poster: { ...poster(''), isDecorative: true } }
+    const out = ser({ ...base, heroVideos: [dec] })
+    expect(typeof out.heroVideos[0].poster).toBe('string')
+    expect(out.heroVideos[0].poster).toContain('p.jpg')
   })
   /* eslint-enable @typescript-eslint/no-explicit-any */
 })

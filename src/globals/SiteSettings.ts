@@ -268,35 +268,43 @@ export const SiteSettings: GlobalConfig = {
             },
             {
               /**
-               * 🔴 THE ACTIVE VIDEO — AND THE NAME IS DELIBERATELY `video`, NOT
-               * `heroVideo`.
+               * 🔴 THE ACTIVE HERO VIDEOS — AN ORDERED LIST, AND THE ORDER IS
+               * THE CONTRACT.
                *
-               * This field answers exactly one question: WHICH video is live.
-               * It does not answer WHERE it appears, and it must never grow a
-               * field that does. No placement enum, no section selector, no
-               * ordering, no layout configuration. The website decides where a
-               * video is rendered; the CMS decides which one is current.
+               * This replaces the singular `video` field from d40bad6. That
+               * field was written against a contract the frontend had not yet
+               * implemented; the frontend now ships `site-settings.heroVideos`
+               * and consumes an ARRAY whose index IS the carousel order
+               * (`HeroVideoStage` advances with `(i + 1) % videos.length`). One
+               * entry renders a still pane, two or more render the carousel,
+               * and absent-or-empty renders the type-only hero.
                *
-               * That separation is what makes the asset reusable: the same
-               * value can feed a homepage background today and an about-page
-               * band later with NO backend change of any kind.
+               * 🔴 `hasMany: true` IS WHAT MAKES ORDERING A STORED FACT rather
+               * than an emergent one. Payload persists a hasMany relation in a
+               * `_rels` side table carrying an explicit `order` column and
+               * returns rows in that order, so drag-to-reorder in the admin is
+               * the ONLY thing that decides carousel order. The serialiser must
+               * therefore never sort — see the note in `toPublicContent.ts`.
                *
-               * It follows the two references that already live on this global —
-               * `logo` -> media, `masterPlan` -> documents, `video` -> videos —
-               * so it is the third instance of an established pattern rather
-               * than a new mechanism.
+               * ⚠️ STILL PLACEMENT-NEUTRAL, AND THE NAME DOES NOT CHANGE THAT.
+               * `heroVideos` is the frontend's chosen key for "the ordered
+               * videos the site is currently running", not an instruction about
+               * where they go. There is still no placement enum, no section
+               * selector, no carousel configuration and no layout field here —
+               * the website owns all of that. The name matches the consumer's
+               * contract, which is the one thing a CMS field genuinely must do.
                *
-               * Optional on purpose: clearing it is how a video is taken off the
-               * site WITHOUT deleting the asset. The public serialiser then
-               * omits the key entirely and the frontend falls back to whatever
-               * it renders without one.
+               * Optional on purpose: clearing the list is how videos are taken
+               * off the site WITHOUT deleting the assets, which stay in
+               * Media → Videos.
                */
-              name: 'video',
+              name: 'heroVideos',
               type: 'upload',
               relationTo: 'videos',
+              hasMany: true,
               admin: {
                 description:
-                  'The site’s active video. Where it appears on the website is decided by the website itself — this setting only chooses which video is live. Leave empty for no video.',
+                  'The videos the site is currently running, in order — drag to reorder. The website decides how they are presented: one video shows on its own, several become a carousel in exactly this order. Leave empty for no video.',
               },
             },
           ],

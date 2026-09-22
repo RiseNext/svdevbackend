@@ -1787,9 +1787,6 @@ export const site_settings = pgTable(
     masterPlan: uuid("master_plan_id").references(() => documents.id, {
       onDelete: "set null",
     }),
-    video: uuid("video_id").references(() => videos.id, {
-      onDelete: "set null",
-    }),
     updatedAt: timestamp("updated_at", {
       mode: "string",
       withTimezone: true,
@@ -1804,7 +1801,6 @@ export const site_settings = pgTable(
   (columns) => [
     index("site_settings_logo_idx").on(columns.logo),
     index("site_settings_master_plan_idx").on(columns.masterPlan),
-    index("site_settings_video_idx").on(columns.video),
   ],
 );
 
@@ -1823,6 +1819,33 @@ export const site_settings_texts = pgTable(
       columns: [columns["parent"]],
       foreignColumns: [site_settings.id],
       name: "site_settings_texts_parent_fk",
+    }).onDelete("cascade"),
+  ],
+);
+
+export const site_settings_rels = pgTable(
+  "site_settings_rels",
+  {
+    id: serial("id").primaryKey(),
+    order: integer("order"),
+    parent: uuid("parent_id").notNull(),
+    path: varchar("path").notNull(),
+    videosID: uuid("videos_id"),
+  },
+  (columns) => [
+    index("site_settings_rels_order_idx").on(columns.order),
+    index("site_settings_rels_parent_idx").on(columns.parent),
+    index("site_settings_rels_path_idx").on(columns.path),
+    index("site_settings_rels_videos_id_idx").on(columns.videosID),
+    foreignKey({
+      columns: [columns["parent"]],
+      foreignColumns: [site_settings.id],
+      name: "site_settings_rels_parent_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [columns["videosID"]],
+      foreignColumns: [videos.id],
+      name: "site_settings_rels_videos_fk",
     }).onDelete("cascade"),
   ],
 );
@@ -1917,9 +1940,6 @@ export const _site_settings_v = pgTable(
         onDelete: "set null",
       },
     ),
-    version_video: uuid("version_video_id").references(() => videos.id, {
-      onDelete: "set null",
-    }),
     version_updatedAt: timestamp("version_updated_at", {
       mode: "string",
       withTimezone: true,
@@ -1950,9 +1970,6 @@ export const _site_settings_v = pgTable(
     index("_site_settings_v_version_version_master_plan_idx").on(
       columns.version_masterPlan,
     ),
-    index("_site_settings_v_version_version_video_idx").on(
-      columns.version_video,
-    ),
     index("_site_settings_v_created_at_idx").on(columns.createdAt),
     index("_site_settings_v_updated_at_idx").on(columns.updatedAt),
   ],
@@ -1976,6 +1993,33 @@ export const _site_settings_v_texts = pgTable(
       columns: [columns["parent"]],
       foreignColumns: [_site_settings_v.id],
       name: "_site_settings_v_texts_parent_fk",
+    }).onDelete("cascade"),
+  ],
+);
+
+export const _site_settings_v_rels = pgTable(
+  "_site_settings_v_rels",
+  {
+    id: serial("id").primaryKey(),
+    order: integer("order"),
+    parent: uuid("parent_id").notNull(),
+    path: varchar("path").notNull(),
+    videosID: uuid("videos_id"),
+  },
+  (columns) => [
+    index("_site_settings_v_rels_order_idx").on(columns.order),
+    index("_site_settings_v_rels_parent_idx").on(columns.parent),
+    index("_site_settings_v_rels_path_idx").on(columns.path),
+    index("_site_settings_v_rels_videos_id_idx").on(columns.videosID),
+    foreignKey({
+      columns: [columns["parent"]],
+      foreignColumns: [_site_settings_v.id],
+      name: "_site_settings_v_rels_parent_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [columns["videosID"]],
+      foreignColumns: [videos.id],
+      name: "_site_settings_v_rels_videos_fk",
     }).onDelete("cascade"),
   ],
 );
@@ -2516,6 +2560,21 @@ export const relations_site_settings_texts = relations(
     }),
   }),
 );
+export const relations_site_settings_rels = relations(
+  site_settings_rels,
+  ({ one }) => ({
+    parent: one(site_settings, {
+      fields: [site_settings_rels.parent],
+      references: [site_settings.id],
+      relationName: "_rels",
+    }),
+    videosID: one(videos, {
+      fields: [site_settings_rels.videosID],
+      references: [videos.id],
+      relationName: "videos",
+    }),
+  }),
+);
 export const relations_site_settings = relations(
   site_settings,
   ({ one, many }) => ({
@@ -2538,13 +2597,11 @@ export const relations_site_settings = relations(
       references: [documents.id],
       relationName: "masterPlan",
     }),
-    video: one(videos, {
-      fields: [site_settings.video],
-      references: [videos.id],
-      relationName: "video",
-    }),
     _texts: many(site_settings_texts, {
       relationName: "_texts",
+    }),
+    _rels: many(site_settings_rels, {
+      relationName: "_rels",
     }),
   }),
 );
@@ -2588,6 +2645,21 @@ export const relations__site_settings_v_texts = relations(
     }),
   }),
 );
+export const relations__site_settings_v_rels = relations(
+  _site_settings_v_rels,
+  ({ one }) => ({
+    parent: one(_site_settings_v, {
+      fields: [_site_settings_v_rels.parent],
+      references: [_site_settings_v.id],
+      relationName: "_rels",
+    }),
+    videosID: one(videos, {
+      fields: [_site_settings_v_rels.videosID],
+      references: [videos.id],
+      relationName: "videos",
+    }),
+  }),
+);
 export const relations__site_settings_v = relations(
   _site_settings_v,
   ({ one, many }) => ({
@@ -2610,13 +2682,11 @@ export const relations__site_settings_v = relations(
       references: [documents.id],
       relationName: "version_masterPlan",
     }),
-    version_video: one(videos, {
-      fields: [_site_settings_v.version_video],
-      references: [videos.id],
-      relationName: "version_video",
-    }),
     _texts: many(_site_settings_v_texts, {
       relationName: "_texts",
+    }),
+    _rels: many(_site_settings_v_rels, {
+      relationName: "_rels",
     }),
   }),
 );
@@ -2690,11 +2760,13 @@ type DatabaseSchema = {
   site_hero_ticker: typeof site_hero_ticker;
   site_settings: typeof site_settings;
   site_settings_texts: typeof site_settings_texts;
+  site_settings_rels: typeof site_settings_rels;
   _site_social_v: typeof _site_social_v;
   _site_legal_links_v: typeof _site_legal_links_v;
   _site_hero_ticker_v: typeof _site_hero_ticker_v;
   _site_settings_v: typeof _site_settings_v;
   _site_settings_v_texts: typeof _site_settings_v_texts;
+  _site_settings_v_rels: typeof _site_settings_v_rels;
   payload_jobs_stats: typeof payload_jobs_stats;
   relations_users_sessions: typeof relations_users_sessions;
   relations_users: typeof relations_users;
@@ -2742,11 +2814,13 @@ type DatabaseSchema = {
   relations_site_legal_links: typeof relations_site_legal_links;
   relations_site_hero_ticker: typeof relations_site_hero_ticker;
   relations_site_settings_texts: typeof relations_site_settings_texts;
+  relations_site_settings_rels: typeof relations_site_settings_rels;
   relations_site_settings: typeof relations_site_settings;
   relations__site_social_v: typeof relations__site_social_v;
   relations__site_legal_links_v: typeof relations__site_legal_links_v;
   relations__site_hero_ticker_v: typeof relations__site_hero_ticker_v;
   relations__site_settings_v_texts: typeof relations__site_settings_v_texts;
+  relations__site_settings_v_rels: typeof relations__site_settings_v_rels;
   relations__site_settings_v: typeof relations__site_settings_v;
   relations_payload_jobs_stats: typeof relations_payload_jobs_stats;
 };

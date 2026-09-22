@@ -215,11 +215,16 @@ export const videoDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) 
       overrideAccess: true,
       req,
     })
-    const videoRef = (settings as { video?: string | { id?: string } } | null)?.video
-    const videoId = typeof videoRef === 'object' && videoRef ? videoRef.id : videoRef
-    if (videoId && String(videoId) === String(id)) {
+    // `heroVideos` is a hasMany upload: at depth 0 it is an ARRAY of ids, but
+    // a populated read would give objects. Both shapes are normalised here so
+    // the guard does not depend on the caller's depth.
+    const refs = (settings as { heroVideos?: unknown } | null)?.heroVideos
+    const ids = (Array.isArray(refs) ? refs : []).map((r) =>
+      r && typeof r === 'object' ? String((r as { id?: unknown }).id ?? '') : String(r ?? ''),
+    )
+    if (ids.some((v) => v && v === String(id))) {
       throw new APIError(
-        'This is the site’s active video and cannot be deleted — the website would silently lose it. Clear the Video field in Site Settings first (that takes it off the site without destroying the file), then delete it here.',
+        'This video is one of the site’s active hero videos and cannot be deleted — the website would silently lose it. Remove it from Hero Videos in Site Settings first (that takes it off the site without destroying the file), then delete it here.',
         409,
       )
     }

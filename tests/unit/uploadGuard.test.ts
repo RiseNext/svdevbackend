@@ -196,8 +196,14 @@ describe('uploadGuard — documents keep streaming from disk', () => {
  * type, range requests, seeking — was verified against the live Cloudinary
  * account with a real H.264/AAC file before any of this code was written.
  */
-const makeMp4 = (padding = 0): Buffer =>
-  Buffer.concat([
+const makeMp4 = (padding = 0): Buffer => {
+  // ð´ The mdat size INCLUDES the padding. Payload validates the ISO-BMFF
+  // container independently of this guard, and bytes trailing outside any box
+  // are rejected as "Invalid or corrupted ISO base media file." These cases
+  // exercise the guard in isolation, but the fixture stays honest so it can be
+  // reused anywhere without producing a corrupt container.
+  const mdatSize = 8 + padding
+  return Buffer.concat([
     // ftyp box: size 0x20, major brand isom, compatible brands.
     Buffer.from([0, 0, 0, 0x20]),
     Buffer.from('ftyp'),
@@ -208,10 +214,16 @@ const makeMp4 = (padding = 0): Buffer =>
     Buffer.from('avc1'),
     Buffer.from('mp41'),
     // mdat box, optionally padded so a case can exceed the size ceiling.
-    Buffer.from([0, 0, 0, 8]),
+    Buffer.from([
+      (mdatSize >>> 24) & 0xff,
+      (mdatSize >>> 16) & 0xff,
+      (mdatSize >>> 8) & 0xff,
+      mdatSize & 0xff,
+    ]),
     Buffer.from('mdat'),
     Buffer.alloc(padding),
   ])
+}
 
 describe('uploadGuard — video takes the document path, never the sharp path', () => {
   it('accepts an MP4, renames it to a UUID and preserves the original name', async () => {

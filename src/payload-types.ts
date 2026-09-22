@@ -1621,9 +1621,9 @@ export interface SiteSetting {
    */
   masterPlan?: (string | null) | Document;
   /**
-   * The site’s active video. Where it appears on the website is decided by the website itself — this setting only chooses which video is live. Leave empty for no video.
+   * The videos the site is currently running, in order — drag to reorder. The website decides how they are presented: one video shows on its own, several become a carousel in exactly this order. Leave empty for no video.
    */
-  video?: (string | null) | Video;
+  heroVideos?: (string | Video)[] | null;
   updatedAt?: string | null;
   createdAt?: string | null;
 }
@@ -1692,7 +1692,7 @@ export interface SiteSettingsSelect<T extends boolean = true> {
         id?: T;
       };
   masterPlan?: T;
-  video?: T;
+  heroVideos?: T;
   updatedAt?: T;
   createdAt?: T;
   globalType?: T;
