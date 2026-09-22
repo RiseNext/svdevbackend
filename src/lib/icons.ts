@@ -84,3 +84,41 @@ export const humaniseIcon = (value: string): string => {
   const spaced = value.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
+
+/**
+ * THE ICON DRIFT INVARIANT: **BACKEND ⊆ FRONTEND**.
+ *
+ * Returns the backend icons the frontend cannot render — empty means no drift.
+ *
+ * 🔴 THE DIRECTION IS THE WHOLE POINT, AND IT IS ASYMMETRIC ON PURPOSE.
+ *
+ *   backend has an icon the frontend lacks  -> DANGEROUS. The CMS can store it,
+ *     `Icon.tsx` has no shape for it, and it renders as "a silent, invisible
+ *     24px blank box. No error, no warning, no visual indication in logs."
+ *     That is the failure this check exists for.
+ *
+ *   frontend has an icon the backend lacks  -> HARMLESS. It is a UI-internal
+ *     icon the CMS simply never offers. Nothing can store it, so nothing can
+ *     fail to render it.
+ *
+ * ⚠️ THIS USED TO REQUIRE THE TWO LISTS TO BE IDENTICAL, AND THAT WAS STRICTER
+ * THAN ITS OWN STATED PURPOSE. The frontend's hero carousel added `play` and
+ * `pause` for its pause control — transport icons, never content, never stored.
+ * Equality failed on them and the only ways to satisfy it were to add two
+ * meaningless options to `enum_icon_name` (a shared production enum backing
+ * `projects` feature/proximity icons and `site-settings` social/ticker icons,
+ * plus a migration) or to ignore the check. Neither is right, because neither
+ * addresses any actual risk.
+ *
+ * 🔴 THIS IS A TIGHTENING OF CORRECTNESS, NOT A LOOSENING OF SAFETY. The
+ * dangerous direction is still a hard failure; only the direction that was
+ * never dangerous is now permitted. A backend icon missing from the frontend
+ * still fails, which `tests/unit/iconDrift.test.ts` pins.
+ */
+export const iconsNotRenderableByFrontend = (
+  backend: readonly string[],
+  frontend: readonly string[],
+): string[] => {
+  const renderable = new Set(frontend)
+  return backend.filter((name) => !renderable.has(name)).sort()
+}

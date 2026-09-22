@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ICON_NAMES } from '@/lib/icons'
+import { ICON_NAMES, iconsNotRenderableByFrontend } from '@/lib/icons'
 import { ENV_KEYS } from '@/schemas/env'
 
 /**
@@ -11,10 +11,14 @@ import { ENV_KEYS } from '@/schemas/env'
  * Each protects a fact that lives in ANOTHER FILE — in two cases, in another
  * REPOSITORY — where nothing else would catch a change.
  *
- *   1. THE ICON ENUM. `src/lib/icons.ts` must match the frontend's `IconName`
- *      union exactly. Drift means the CMS offers an icon the site cannot render,
- *      and the failure mode is the worst in the codebase: "a silent, invisible
- *      24px blank box. No error, no warning, no visual indication in logs."
+ *   1. THE ICON ENUM. Every icon `src/lib/icons.ts` can store MUST exist in the
+ *      frontend's `IconName` union — BACKEND ⊆ FRONTEND. Drift means the CMS
+ *      offers an icon the site cannot render, and the failure mode is the worst
+ *      in the codebase: "a silent, invisible 24px blank box. No error, no
+ *      warning, no visual indication in logs."
+ *      ⚠️ The converse is NOT drift: the frontend may carry UI-internal icons
+ *      (the hero carousel's `play`/`pause` transport controls) that the CMS
+ *      never offers and cannot store. See `iconsNotRenderableByFrontend`.
  *
  *   2. THE PUBLIC CONTRACT. `src/types/frontend-contract.ts` is a BYTE-IDENTICAL
  *      copy of `svfrontend/src/types/content.ts`. Payload has no built-in
@@ -54,15 +58,23 @@ const checkIcons = () => {
   const frontend = [...union[1]!.matchAll(/'([a-zA-Z]+)'/g)].map((m) => m[1]!).sort()
   const backend = [...ICON_NAMES].sort()
 
-  const missing = frontend.filter((n) => !backend.includes(n as never))
-  const extra = backend.filter((n) => !frontend.includes(n))
+  // BACKEND ⊆ FRONTEND. Only the dangerous direction fails — see
+  // `iconsNotRenderableByFrontend` for why this is asymmetric.
+  const unrenderable = iconsNotRenderableByFrontend(backend, frontend)
 
-  if (missing.length || extra.length) {
+  if (unrenderable.length) {
     return fail(
-      `icon enum drift — missing from backend: [${missing.join(', ')}] · not in frontend: [${extra.join(', ')}]`,
+      `icon enum drift — the CMS can store [${unrenderable.join(', ')}], which the frontend cannot render (they would appear as invisible blank boxes). Add the shape to svfrontend's Icon.tsx, or remove the name from ICON_NAMES.`,
     )
   }
-  pass(`icon enum: ${backend.length} values, identical to the frontend union`)
+
+  const frontendOnly = frontend.filter((n) => !backend.includes(n as never))
+  pass(
+    `icon enum: ${backend.length} CMS values, all renderable by the frontend` +
+      (frontendOnly.length
+        ? ` (+${frontendOnly.length} frontend-only UI icon(s): ${frontendOnly.join(', ')})`
+        : ''),
+  )
 }
 
 // ------------------------------------------------------------- 2. contract
