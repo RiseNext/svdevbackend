@@ -87,7 +87,46 @@ export default buildConfig({
     // Documented to return HTTP 413.
     abortOnLimit: true,
     useTempFiles: true,
-    tempFileDir: path.resolve(dirname, '../.tmp/uploads'),
+    // -----------------------------------------------------------------------
+    // 🔴 ABSOLUTE, AND OUTSIDE THE APPLICATION DIRECTORY. NOT A TIDY-UP.
+    //
+    // This was `path.resolve(dirname, '../.tmp/uploads')`, which resolves INSIDE
+    // the app directory — `/app/.tmp/uploads` in the container. Every production
+    // upload then died with:
+    //
+    //   EACCES: permission denied, mkdir '/app/.tmp/uploads'
+    //   POST /payload-api/media -> 500
+    //
+    // WHY IT CANNOT WORK THERE: the runtime image does `WORKDIR /app` and then
+    // `USER nextjs` (uid 1001). Only `.next` and the COPYed trees are chowned to
+    // that user — the `/app` DIRECTORY ITSELF is created by WORKDIR and stays
+    // root-owned at mode 755, so an unprivileged process cannot create a new
+    // subdirectory in it. Payload's multipart handler calls
+    // `checkAndMakeDir({ createParentPath: true }, …)`
+    // (uploads/fetchAPI-multipart/handlers.js), which `mkdirSync`s the parent of
+    // the temp file — and that mkdir is what is denied. The browser preview
+    // succeeds because it never touches the server.
+    //
+    // WHY `/tmp` IS THE RIGHT ANSWER ON RAILWAY: `/tmp` is a world-writable
+    // (mode 1777) directory that exists in the image, so uid 1001 can always
+    // write there without a volume, a mount or a chown at deploy time. It is
+    // ephemeral, which is exactly correct — these files live for the duration of
+    // one request.
+    //
+    // 🔴 THE VALUE IS LITERAL AND MUST STAY BYTE-IDENTICAL TO THE DOCKERFILE,
+    // which already provisions precisely this path and whose comment predicted
+    // this failure verbatim:
+    //   RUN mkdir -p /tmp/payload-uploads && chown -R nextjs:nodejs /tmp/payload-uploads
+    // A test asserts the two agree, because that drift is what caused the outage.
+    // `os.tmpdir()` is deliberately NOT used: it honours `TMPDIR`, which would
+    // silently point somewhere the Dockerfile never chowned.
+    //
+    // ⚠️ THIS IS NOT STORAGE. Permanent media lives in CLOUDINARY
+    // (src/media/storage.ts). The storage plugin sets `disableLocalStorage` on
+    // both upload collections, so nothing is ever persisted here and `staticDir`
+    // is not a write target in production. A file passes through this directory
+    // on its way to Cloudinary and is removed again.
+    tempFileDir: '/tmp/payload-uploads',
     // Never echoes a path or a bucket name.
     responseOnLimit: 'That file is too large.',
     // `safeFileNames` / `preserveExtension` deliberately NOT set: they are

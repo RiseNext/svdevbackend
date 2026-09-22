@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import config from '@payload-config'
@@ -188,6 +191,86 @@ describe('upload security config', () => {
     const sizes = (media.upload as { imageSizes?: { withoutEnlargement?: unknown }[] }).imageSizes
     expect(sizes?.length).toBeGreaterThan(0)
     for (const size of sizes ?? []) expect(size.withoutEnlargement).toBe(true)
+  })
+})
+
+/**
+ * THE TEMP-DIRECTORY REGRESSION.
+ *
+ * 🔴 WHAT HAPPENED. `tempFileDir` was `path.resolve(dirname, '../.tmp/uploads')`,
+ * i.e. INSIDE the application directory. In the container that is `/app/…`, and
+ * `/app` is created by `WORKDIR` as root at mode 755 while the process runs as
+ * `USER nextjs` (uid 1001). Payload's multipart handler `mkdirSync`s the parent
+ * of each temp file (`uploads/fetchAPI-multipart/handlers.js` ->
+ * `checkAndMakeDir`), so every single production upload died on:
+ *
+ *   EACCES: permission denied, mkdir '/app/.tmp/uploads'
+ *   POST /payload-api/media -> 500
+ *
+ * Nothing caught it: the path is only unwritable under the container's
+ * unprivileged user, and locally it happily created `<repo>/.tmp/uploads`.
+ *
+ * The Dockerfile had ALREADY provisioned the correct directory and its comment
+ * named this exact failure — the two files had simply drifted apart. The last
+ * case below is therefore the one that matters most: it pins config and
+ * Dockerfile together so they cannot diverge again.
+ */
+describe('upload temp directory — the EACCES regression', () => {
+  const tempFileDir = (resolved.upload as { tempFileDir?: unknown }).tempFileDir
+
+  it('useTempFiles stays ON — it is the large-file memory control', () => {
+    expect((resolved.upload as { useTempFiles?: unknown }).useTempFiles).toBe(true)
+  })
+
+  it('tempFileDir is an ABSOLUTE path', () => {
+    // A relative value is resolved against the process CWD — which in the
+    // container is `/app`, the directory that cannot be written to. Payload's own
+    // default is the relative string 'tmp', so inheriting it reintroduces the bug.
+    expect(typeof tempFileDir).toBe('string')
+    expect(path.isAbsolute(tempFileDir as string)).toBe(true)
+  })
+
+  it('tempFileDir is NOT inside the application directory', () => {
+    // This is the actual failure condition, expressed directly.
+    const dir = path.resolve(tempFileDir as string)
+    const appRoot = path.resolve(process.cwd())
+    expect(
+      dir.startsWith(appRoot + path.sep),
+      `tempFileDir must live outside the app directory — ${dir} is inside ${appRoot}, which is root-owned in the container`,
+    ).toBe(false)
+    // And specifically never the old value.
+    expect(dir).not.toMatch(/[\\/]\.tmp[\\/]uploads$/)
+  })
+
+  it('tempFileDir is the conventional /tmp location, not a bespoke path', () => {
+    expect(tempFileDir).toBe('/tmp/payload-uploads')
+  })
+
+  it('the Dockerfile provisions EXACTLY the directory the config asks for', async () => {
+    // The cross-file pin. The outage was a drift between these two values, so a
+    // change to either one alone must fail here.
+    const dockerfile = await readFile(path.resolve(process.cwd(), 'Dockerfile'), 'utf8')
+
+    const mkdirMatch = dockerfile.match(/mkdir -p (\S+) && chown -R (\S+) (\S+)/)
+    expect(mkdirMatch, 'Dockerfile must mkdir + chown the upload temp directory').toBeTruthy()
+
+    const [, madeDir, owner, chownedDir] = mkdirMatch!
+    expect(madeDir, 'Dockerfile mkdir path must equal config.upload.tempFileDir').toBe(tempFileDir)
+    expect(chownedDir, 'Dockerfile chown path must equal config.upload.tempFileDir').toBe(tempFileDir)
+    // Must be owned by the user the container actually runs as.
+    expect(dockerfile).toMatch(/^USER nextjs$/m)
+    expect(owner).toBe('nextjs:nodejs')
+  })
+
+  it('the temp directory is NOT permanent storage — Cloudinary is', () => {
+    // Guards against "fixing" the EACCES by pointing staticDir at /tmp, which
+    // would silently make every asset vanish on the next deploy.
+    for (const slug of ['media', 'documents']) {
+      const collection = resolved.collections.find((c) => c.slug === slug)!
+      const staticDir = (collection.upload as { staticDir?: unknown }).staticDir
+      expect(String(staticDir ?? '')).not.toMatch(/(^|[\\/])tmp([\\/]|$)/)
+      expect(staticDir).not.toBe(tempFileDir)
+    }
   })
 })
 
