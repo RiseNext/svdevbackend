@@ -529,6 +529,9 @@ export const projects = pgTable(
     locationMap: uuid("location_map_id").references(() => media.id, {
       onDelete: "set null",
     }),
+    brochure: uuid("brochure_id").references(() => documents.id, {
+      onDelete: "set null",
+    }),
     cta_title: varchar("cta_title"),
     cta_description: varchar("cta_description"),
     seo_title: varchar("seo_title"),
@@ -567,6 +570,7 @@ export const projects = pgTable(
     index("projects_image_idx").on(columns.image),
     index("projects_layout_image_idx").on(columns.layoutImage),
     index("projects_location_map_idx").on(columns.locationMap),
+    index("projects_brochure_idx").on(columns.brochure),
     uniqueIndex("projects_slug_idx").on(columns.slug),
     index("projects_featured_idx").on(columns.featured),
     index("projects_updated_at_idx").on(columns.updatedAt),
@@ -785,6 +789,12 @@ export const _projects_v = pgTable(
         onDelete: "set null",
       },
     ),
+    version_brochure: uuid("version_brochure_id").references(
+      () => documents.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     version_cta_title: varchar("version_cta_title"),
     version_cta_description: varchar("version_cta_description"),
     version_seo_title: varchar("version_seo_title"),
@@ -841,6 +851,9 @@ export const _projects_v = pgTable(
     ),
     index("_projects_v_version_version_location_map_idx").on(
       columns.version_locationMap,
+    ),
+    index("_projects_v_version_version_brochure_idx").on(
+      columns.version_brochure,
     ),
     index("_projects_v_version_version_slug_idx").on(columns.version_slug),
     index("_projects_v_version_version_featured_idx").on(
@@ -2055,6 +2068,11 @@ export const relations_projects = relations(projects, ({ one, many }) => ({
     references: [media.id],
     relationName: "locationMap",
   }),
+  brochure: one(documents, {
+    fields: [projects.brochure],
+    references: [documents.id],
+    relationName: "brochure",
+  }),
   _texts: many(projects_texts, {
     relationName: "_texts",
   }),
@@ -2184,6 +2202,11 @@ export const relations__projects_v = relations(
       fields: [_projects_v.version_locationMap],
       references: [media.id],
       relationName: "version_locationMap",
+    }),
+    version_brochure: one(documents, {
+      fields: [_projects_v.version_brochure],
+      references: [documents.id],
+      relationName: "version_brochure",
     }),
     _texts: many(_projects_v_texts, {
       relationName: "_texts",

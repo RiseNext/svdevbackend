@@ -451,11 +451,43 @@ export const Projects: CollectionConfig = {
               relationTo: 'media',
               admin: { description: 'The location map from the brochure. Shown contained, never cropped.' },
             },
+            {
+              // ⚠️ THIS IS NOT `brochureImages`, AND THE DISTINCTION IS THE POINT.
+              // The contract's `brochureImages?: readonly ImageRef[]`
+              // (types/content.ts:98) is SCANNED BROCHURE PAGES AS IMAGES and
+              // remains deferred — see the note below. THIS field is one PDF
+              // DOCUMENT, which is a different artefact with a different render
+              // story (a download link, not a lightbox of page scans).
+              //
+              // 🔴 POINTS AT THE EXISTING `documents` COLLECTION. No second
+              // upload collection, no duplicated bytes: the PDF is stored once in
+              // `documents` (Cloudinary, `resource_type: 'raw'`) and referenced
+              // here by id. The same PDF may therefore be shared by several
+              // projects without re-uploading it.
+              //
+              // NOT `hasMany`: one brochure per project, enforced by the schema
+              // rather than by a validator.
+              name: 'brochure',
+              label: 'Brochure / PDF',
+              type: 'upload',
+              relationTo: 'documents',
+              admin: {
+                description:
+                  'The project brochure as a PDF, chosen from Documents. Upload it under Media → Documents first, or use “Create New” here. ⚠️ NOT YET RENDERED ON THE WEBSITE: this field is editable now so brochures can be collected, but the public project page has no download link for it yet, so setting it changes nothing visible to a visitor.',
+              },
+            },
             // `brochureImages` is DEFERRED (principle P4): types/content.ts:98
             // declares it, but there are ZERO render sites anywhere in src/ and
             // 0 of 5 projects populate it. One field plus one migration adds it
             // the day a render slot exists. Creating it now would let an admin
             // upload five brochure scans and see nothing change on the site.
+            //
+            // The `brochure` PDF field above is deliberately NOT serialised
+            // either: `toPublicProject()` builds its output from an explicit
+            // allow-list and `PUBLIC_PROJECT_SELECT` does not name it, so the
+            // public API response and `types/content.ts` are BYTE-IDENTICAL to
+            // before this field existed. Wiring it to the website is a separate,
+            // two-repo change (contract + serialiser + a render site).
           ],
         },
 

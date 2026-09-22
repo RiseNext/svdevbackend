@@ -623,6 +623,10 @@ export interface Project {
    */
   locationMap?: (string | null) | Media;
   /**
+   * The project brochure as a PDF, chosen from Documents. Upload it under Media → Documents first, or use “Create New” here. ⚠️ NOT YET RENDERED ON THE WEBSITE: this field is editable now so brochures can be collected, but the public project page has no download link for it yet, so setting it changes nothing visible to a visitor.
+   */
+  brochure?: (string | null) | Document;
+  /**
    * Overrides the shared call-to-action banner for this project only.
    */
   cta?: {
@@ -1203,6 +1207,7 @@ export interface ProjectsSelect<T extends boolean = true> {
   gallery?: T;
   layoutImage?: T;
   locationMap?: T;
+  brochure?: T;
   cta?:
     | T
     | {
