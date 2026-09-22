@@ -1,0 +1,6 @@
+# The vendored copy of svfrontend/src/types/content.ts is compared BYTE FOR BYTE
+# by `npm run check:drift`. svfrontend normalises to LF via its own
+# .gitattributes; this repo has no such rule, so with core.autocrlf=true every
+# Windows checkout rewrote this file to CRLF and the byte comparison could never
+# match. Pinning it to LF makes the two working copies identical on any platform.
+src/types/frontend-contract.ts text eol=lf
