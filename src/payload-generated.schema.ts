@@ -595,6 +595,9 @@ export const projects = pgTable(
     image: uuid("image_id").references(() => media.id, {
       onDelete: "set null",
     }),
+    logo: uuid("logo_id").references(() => media.id, {
+      onDelete: "set null",
+    }),
     layoutImage: uuid("layout_image_id").references(() => media.id, {
       onDelete: "set null",
     }),
@@ -640,6 +643,7 @@ export const projects = pgTable(
     index("projects__order_idx").on(columns._order),
     index("projects_category_idx").on(columns.category),
     index("projects_image_idx").on(columns.image),
+    index("projects_logo_idx").on(columns.logo),
     index("projects_layout_image_idx").on(columns.layoutImage),
     index("projects_location_map_idx").on(columns.locationMap),
     index("projects_brochure_idx").on(columns.brochure),
@@ -849,6 +853,9 @@ export const _projects_v = pgTable(
     version_image: uuid("version_image_id").references(() => media.id, {
       onDelete: "set null",
     }),
+    version_logo: uuid("version_logo_id").references(() => media.id, {
+      onDelete: "set null",
+    }),
     version_layoutImage: uuid("version_layout_image_id").references(
       () => media.id,
       {
@@ -918,6 +925,7 @@ export const _projects_v = pgTable(
       columns.version_category,
     ),
     index("_projects_v_version_version_image_idx").on(columns.version_image),
+    index("_projects_v_version_version_logo_idx").on(columns.version_logo),
     index("_projects_v_version_version_layout_image_idx").on(
       columns.version_layoutImage,
     ),
@@ -2213,6 +2221,11 @@ export const relations_projects = relations(projects, ({ one, many }) => ({
     references: [media.id],
     relationName: "image",
   }),
+  logo: one(media, {
+    fields: [projects.logo],
+    references: [media.id],
+    relationName: "logo",
+  }),
   layoutImage: one(media, {
     fields: [projects.layoutImage],
     references: [media.id],
@@ -2347,6 +2360,11 @@ export const relations__projects_v = relations(
       fields: [_projects_v.version_image],
       references: [media.id],
       relationName: "version_image",
+    }),
+    version_logo: one(media, {
+      fields: [_projects_v.version_logo],
+      references: [media.id],
+      relationName: "version_logo",
     }),
     version_layoutImage: one(media, {
       fields: [_projects_v.version_layoutImage],

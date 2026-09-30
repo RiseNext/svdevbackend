@@ -207,6 +207,38 @@ export const toPublicProject = (doc: PayloadProject): PublicProject => {
   put(out, 'layoutImage', toImageRefOrUndefined(doc.layoutImage, 'layoutImage'))
   put(out, 'locationMap', toImageRefOrUndefined(doc.locationMap, 'locationMap'))
 
+  /**
+   * The project's own logo — the corner plate on its homepage card.
+   *
+   * 🔴 IDENTICAL MECHANISM TO THE TWO LINES ABOVE, DELIBERATELY. `logo` is
+   * optional, so `toImageRefOrUndefined` returns `undefined` when it is absent
+   * and `put()` then OMITS THE KEY ENTIRELY. That is a contract requirement
+   * rather than a stylistic one: the card does `item.logo?.src ? … : null`, and
+   * `logo: null` or `logo: {}` would both be a shape the frontend never agreed
+   * to. `src` comes from `cloudinaryFileUrl` inside `toImageRef` — the same
+   * single definition the storage adapter's `generateURL` uses — so no URL is
+   * hand-built here and the logo cannot acquire a second path convention.
+   *
+   * 🔶 `logo` IS NOT ON `types/frontend-contract.ts`, AND THAT IS CORRECT — DO
+   * NOT "FIX" IT BY ADDING IT.
+   *
+   * The deployed frontend reads this field through a local widened type
+   * (`Project & { logo?: ImageRef }` in `app/page.tsx`, and `logo?: ImageRef | null`
+   * on `MediaSequence`'s own `Item`) and states in both places that the shared
+   * contract is left alone on purpose. That file is vendored into BOTH
+   * repositories and `npm run check:drift` asserts the two copies are
+   * BYTE-IDENTICAL, so adding `logo` here would fail the drift gate and force a
+   * matching frontend commit — for a field the frontend already consumes
+   * without one. Emitting a key the contract does not declare is safe in this
+   * direction: an extra property never breaks a structural type.
+   *
+   * ⚠️ NOT ADDED TO THE LIST ENDPOINT. `toPublicProjectCard` and
+   * `PUBLIC_PROJECT_CARD_SELECT` are untouched — the homepage deck enriches each
+   * card by calling `getProject()` per slug, so the DETAIL endpoint is the only
+   * one that has to carry it.
+   */
+  put(out, 'logo', toImageRefOrUndefined(doc.logo, 'logo'))
+
   put(out, 'cta', ctaOrUndefined(doc.cta))
   put(out, 'seo', seoOrUndefined(doc.seo))
   put(out, 'brochure', brochureOrUndefined(doc.brochure))
@@ -281,6 +313,10 @@ export const PUBLIC_PROJECT_SELECT = {
   gallery: true,
   layoutImage: true,
   locationMap: true,
+  // Selected so `depth: 1` populates it to a real media document. Omitting it
+  // here would hand the serialiser a bare id string, and `toImageRef` throws
+  // `UnpopulatedUploadError` on that rather than emitting a broken image.
+  logo: true,
   cta: true,
   seo: true,
   // The brochure PDF. Selected so `defaultPopulate` on `documents` resolves

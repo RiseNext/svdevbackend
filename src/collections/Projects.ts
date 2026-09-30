@@ -431,6 +431,30 @@ export const Projects: CollectionConfig = {
               },
             },
             {
+              // The project's own wordmark or emblem, for the slot at the
+              // top-right corner of each project card on the homepage deck.
+              //
+              // 🔴 SAME COLLECTION, SAME PIPELINE, SAME GUARD AS `image`. This is
+              // an `upload` to `media`, so it inherits — without restating any of
+              // it — the collection's `mimeTypes` allow-list (jpeg/png/webp/avif,
+              // which is why SVG is refused), `allowRestrictedFileTypes: false`,
+              // the magic-byte sniffing `imageUploadGuard`, EXIF stripping, the
+              // UUID storage key and `sharp` dimension extraction. There is no
+              // logo-specific guard and there must not be one: a second
+              // validation path is a second thing to keep in sync.
+              //
+              // OPTIONAL, and the serialiser OMITS the key when it is absent
+              // rather than emitting `null` — see `toPublicProject`.
+              name: 'logo',
+              label: 'Logo',
+              type: 'upload',
+              relationTo: 'media',
+              admin: {
+                description:
+                  'Optional. The project’s own logo, shown in the corner plate on its homepage card. A TRANSPARENT PNG is preferred; WebP is also accepted. SVG cannot be uploaded — export as PNG. Aim for at least 480px on the long edge: the plate is rendered up to 240px wide on large screens, so a smaller file will look soft. A transparent background is strongly preferred — the plate sits across the card’s edge, over both white and a photograph, so a solid rectangle behind the logo will be visible as a block. The logo is scaled to fit and never cropped, so a wordmark, a square badge or a tall emblem all work.',
+              },
+            },
+            {
               name: 'gallery',
               type: 'upload',
               relationTo: 'media',

@@ -613,6 +613,10 @@ export interface Project {
    */
   image: string | Media;
   /**
+   * Optional. The project’s own logo, shown in the corner plate on its homepage card. A TRANSPARENT PNG is preferred; WebP is also accepted. SVG cannot be uploaded — export as PNG. Aim for at least 480px on the long edge: the plate is rendered up to 240px wide on large screens, so a smaller file will look soft. A transparent background is strongly preferred — the plate sits across the card’s edge, over both white and a photograph, so a solid rectangle behind the logo will be visible as a block. The logo is scaled to fit and never cropped, so a wordmark, a square badge or a tall emblem all work.
+   */
+  logo?: (string | null) | Media;
+  /**
    * Site photography, plantation and cottage shots. Drag to reorder.
    */
   gallery?: (string | Media)[] | null;
@@ -1268,6 +1272,7 @@ export interface ProjectsSelect<T extends boolean = true> {
         id?: T;
       };
   image?: T;
+  logo?: T;
   gallery?: T;
   layoutImage?: T;
   locationMap?: T;
