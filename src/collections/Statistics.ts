@@ -46,7 +46,8 @@ export const Statistics: CollectionConfig = {
 
   hooks: {
     afterChange: [auditAfterChange, revalidateContent('statistics', ['/', '/about'])],
-    afterDelete: [auditAfterDelete],
+    // 🔶 PRE-EXISTING gap, same as `testimonials` — see the note there.
+    afterDelete: [auditAfterDelete, revalidateContent('statistics', ['/', '/about'])],
   },
 
   fields: [

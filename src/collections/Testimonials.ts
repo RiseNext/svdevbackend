@@ -68,7 +68,20 @@ export const Testimonials: CollectionConfig = {
       },
     ],
     afterChange: [auditAfterChange, revalidateContent('testimonials', ['/'])],
-    afterDelete: [auditAfterDelete],
+    /**
+     * 🔶 `revalidateContent` ADDED HERE — a PRE-EXISTING gap, not a regression
+     * from the media work (this file is unchanged since the foundation commit
+     * 1cb5688, 20 Sep 2026; `git diff` on it is empty).
+     *
+     * 🔴 WHY IT MATTERS MOST ON THIS COLLECTION. Archiving a testimonial is
+     * precisely the action that must take effect at once: the reason to remove
+     * one is usually that the client WITHDREW CONSENT. Without this hook the
+     * quote stayed on the live homepage until the one-hour ISR floor expired,
+     * with the admin seeing it removed in the CMS and no way to tell the site
+     * had not caught up. `projects` and `blog-posts` already revalidate on
+     * delete; these three did not.
+     */
+    afterDelete: [auditAfterDelete, revalidateContent('testimonials', ['/'])],
   },
 
   fields: [

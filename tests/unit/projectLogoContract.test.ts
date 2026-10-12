@@ -159,7 +159,7 @@ describe('changing ONLY the logo fires the EXISTING project revalidation', () =>
     expect(calls[0]!.body.tags.sort()).toEqual(['project:sri-vanam', 'projects'])
   })
 
-  it('emits the existing paths, unchanged', async () => {
+  it('emits every path that renders a project, including /gallery', async () => {
     const revalidateProject = await loadHook()
     const calls = capture()
 
@@ -169,8 +169,26 @@ describe('changing ONLY the logo fires the EXISTING project revalidation', () =>
       context: {},
     })
 
-    // The homepage deck is at '/', which is where the logo plate is rendered.
-    expect(calls[0]!.body.paths).toEqual(['/', '/projects', '/sitemap.xml', '/projects/sri-vanam'])
+    /* The homepage deck is at '/', which is where the logo plate is rendered.
+     *
+     * 🔶 `/gallery` WAS ADDED, and this assertion changed WITH the behaviour
+     * rather than being relaxed to accommodate it — it is still an exact array,
+     * in order. That page did not exist when this list was written; it is built
+     * entirely from the project set (`getProjects()` then `getProject()` per
+     * slug, deduped by `src`), so a new or edited project's photographs belong
+     * in the wall as soon as it publishes. Omitting it meant the gallery served
+     * a stale set until the one-hour ISR floor expired.
+     *
+     * If this fails again, the question to ask is whether a route that renders
+     * project data was added or removed — not whether the expectation is
+     * inconvenient. */
+    expect(calls[0]!.body.paths).toEqual([
+      '/',
+      '/projects',
+      '/gallery',
+      '/sitemap.xml',
+      '/projects/sri-vanam',
+    ])
   })
 
   it('`revalidateProject` is still registered on the Projects afterChange hook', async () => {

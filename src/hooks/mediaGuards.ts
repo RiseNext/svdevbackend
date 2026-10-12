@@ -76,15 +76,57 @@ export const captureReplacedFile: CollectionAfterChangeHook = async ({
 type Usage = { label: string; names: string[] }
 
 /**
- * THE IN-USE DELETE GUARD — FR-MEDIA-08.
+ * 🔴 TRASHING IS A SOFT DELETE, AND A SOFT DELETE IS AN **UPDATE**. MEASURED.
  *
- * WHY THIS IS NOT OPTIONAL: `image` is REQUIRED on `Project`, and
- * `ProjectDetail.tsx:84`, `ProjectCard.tsx:19-22` and `lib/seo.ts:61-66` all
- * dereference `project.image.*` WITHOUT GUARDS. Because `generateStaticParams`
- * prerenders every project, deleting a cover does not degrade a page — it
- * BREAKS THE BUILD.
+ * This predicate exists because `beforeDelete` is NOT the path the Admin Panel
+ * takes. `@payloadcms/ui/dist/elements/DeleteDocument/index.js:86-99`:
+ *
+ *     const res = permanentlyDelete
+ *       ? await requests.delete(url, …)
+ *       : await requests.patch(url, { body: JSON.stringify({ deletedAt: … }) })
+ *
+ * So the ordinary Delete button on a collection with `trash: true` issues a
+ * PATCH that sets `deletedAt`. That is an update, `beforeDelete` never runs,
+ * and the in-use guards below were therefore bypassed by the single most
+ * common way an editor removes an asset.
+ *
+ * ⚠️ PROVEN, NOT INFERRED. Against the local test database, with an image in
+ * use as `heroMedia[0].image`:
+ *     DELETE /payload-api/media/<id>                     -> 409  (guard fired)
+ *     PATCH  /payload-api/media/<id> {deletedAt: "…"}    -> 200  (guard skipped)
+ * and `/api/v1/site-settings` then returned TWO hero rows instead of three —
+ * the slide vanished from the homepage with no error anywhere. That is exactly
+ * the silent loss these guards exist to prevent.
+ *
+ * ⚠️ IT MUST ONLY FIRE ON THE null -> SET TRANSITION. A restore sets
+ * `deletedAt` back to null, and an ordinary edit (replacing the file, fixing
+ * the alt text) carries no `deletedAt` at all. Treating either as a trash
+ * attempt would make a trashed asset impossible to restore and a normal save
+ * impossible to perform.
  */
-export const mediaDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) => {
+const isBeingTrashed = (
+  data: Record<string, unknown> | undefined,
+  originalDoc: Record<string, unknown> | undefined,
+): boolean => {
+  if (!data || !('deletedAt' in data)) return false
+  const next = data.deletedAt
+  if (next === null || next === undefined || next === '') return false
+  // Already trashed: a second PATCH is not a new trash event.
+  return !originalDoc?.deletedAt
+}
+
+/**
+ * THE IN-USE CHECK FOR AN IMAGE — shared by the hard-delete and trash paths.
+ *
+ * 🔴 ONE IMPLEMENTATION, TWO CALLERS, DELIBERATELY. The whole defect above was
+ * caused by two delete routes and one guard. Returning the usages instead of
+ * throwing lets both hooks apply the identical rule, so a future reference site
+ * added here is covered on both paths at once and cannot be half-covered again.
+ */
+const collectMediaUsages = async (
+  req: Parameters<CollectionBeforeDeleteHook>[0]['req'],
+  id: unknown,
+): Promise<{ usages: Usage[]; publishedCover: boolean }> => {
   const usages: Usage[] = []
 
   const countIn = async (field: string, label: string) => {
@@ -113,6 +155,24 @@ export const mediaDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) 
   await countIn('gallery', 'gallery')
   await countIn('layoutImage', 'layout plan')
   await countIn('locationMap', 'location map')
+  await countIn('logo', 'project logo')
+  /**
+   * 🔴 THE POSTER ON A PROJECT'S VIDEO LIST — ADDED WITH `projects.videos`, AND
+   * ITS ABSENCE WAS A REAL SILENT-LOSS BUG.
+   *
+   * `toPublicProject`'s `projectVideosOrUndefined()` treats the poster as
+   * MANDATORY for a `kind: 'youtube'` row and DROPS the whole row without one
+   * (YouTube's own thumbnail host is deliberately not in the frontend's image
+   * allow-list, so a posterless YouTube pane would render empty). The FK is
+   * `ON DELETE set null`, so deleting this image did not error anywhere — the
+   * row survived with a null poster, the serialiser dropped it, and the video
+   * vanished from the project page with nothing in any log. That is exactly the
+   * failure mode this guard exists to prevent.
+   *
+   * Payload queries an array sub-field by dotted path, so one `where` covers
+   * every row of every project.
+   */
+  await countIn('videos.poster', 'project video poster')
 
   // ⚠️ The Join Field documents `collection` — a collection slug — so a GLOBAL
   // reference cannot be a join field and must be counted explicitly.
@@ -128,8 +188,75 @@ export const mediaDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) 
     if (logoIdValue && String(logoIdValue) === String(id)) {
       usages.push({ label: 'site logo', names: ['Site settings'] })
     }
+
+    /**
+     * 🔴 THE HERO MEDIA LIST — ADDED WITH `site-settings.heroMedia`, AND ITS
+     * ABSENCE WAS THE SAME SILENT-LOSS BUG AS THE PROJECT POSTER ABOVE.
+     *
+     * A `kind: 'image'` row IS its image, and a `kind: 'youtube'` row cannot
+     * render without its poster — `heroMediaOrUndefined()` drops either row
+     * when the relation does not resolve. The FK is `ON DELETE set null`, so
+     * deleting one of these images produced no error: the hero simply lost a
+     * slide, or fell back to the legacy `heroVideos`, with nothing anywhere to
+     * say why.
+     *
+     * ⚠️ COUNTED HERE RATHER THAN AS A JOIN FIELD for the same structural
+     * reason as the site logo above: `site-settings` is a GLOBAL, and the Join
+     * Field documents a COLLECTION slug.
+     *
+     * Both the image slot and the poster slot are checked, and the row's
+     * position is reported so an admin can find it in a long list.
+     */
+    const heroMedia = (settings as { heroMedia?: unknown } | null)?.heroMedia
+    if (Array.isArray(heroMedia)) {
+      const refId = (value: unknown): string =>
+        value && typeof value === 'object'
+          ? String((value as { id?: unknown }).id ?? '')
+          : String(value ?? '')
+
+      const hits: string[] = []
+      heroMedia.forEach((row, i) => {
+        if (!row || typeof row !== 'object') return
+        const r = row as { image?: unknown; poster?: unknown; title?: unknown; kind?: unknown }
+        const where = typeof r.title === 'string' && r.title.trim() ? r.title.trim() : `row ${i + 1}`
+        if (refId(r.image) === String(id)) hits.push(`${where} (image)`)
+        if (refId(r.poster) === String(id)) hits.push(`${where} (poster)`)
+      })
+      if (hits.length) usages.push({ label: 'homepage hero media', names: hits })
+    }
   } catch {
     // The global may not exist yet on a fresh database. Not a reason to block.
+  }
+
+  /**
+   * 🔴 A BLOG POST'S COVER. Unlike the two above, this one degrades GRACEFULLY —
+   * `cover` is optional on `BlogPost` and the card falls back to a type-only
+   * treatment — so losing it is not silent content loss in the same way.
+   *
+   * It is still counted, because the admin deleting the image is almost
+   * certainly not intending to strip the illustration off a published article,
+   * and an informative refusal is cheaper than noticing it later on the live
+   * site. `trash: true` so an archived post still holds its claim.
+   */
+  try {
+    const coverInPosts = await req.payload.find({
+      collection: 'blog-posts',
+      where: { cover: { equals: id } },
+      limit: 25,
+      depth: 0,
+      overrideAccess: true,
+      trash: true,
+      req,
+      select: { title: true },
+    })
+    if (coverInPosts.totalDocs > 0) {
+      usages.push({
+        label: 'blog post cover',
+        names: coverInPosts.docs.map((d) => String((d as { title?: string }).title ?? d.id)),
+      })
+    }
+  } catch {
+    // The collection may not exist yet on a database migrated only partway.
   }
 
   /**
@@ -164,29 +291,82 @@ export const mediaDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) 
     })
   }
 
-  if (usages.length === 0) return
-
   // 🔴 A published project may NEVER end up without a cover — see above. This is
   // a hard refusal, not a warning, and `?force=true` does not override it. The
   // documented alternative (unpublish the affected projects and say so) is
   // acceptable but noisier; one behaviour is chosen and never left silent.
-  const publishedCover = coverRes.docs.some((d) => (d as { _status?: string })._status === 'published')
+  const publishedCover = coverRes.docs.some(
+    (d) => (d as { _status?: string })._status === 'published',
+  )
 
+  return { usages, publishedCover }
+}
+
+/** The refusal, shared by both delete paths so the wording cannot diverge. */
+const throwMediaInUse = (usages: Usage[], publishedCover: boolean, verb: string): never => {
   const detail = usages
     .map((u) => `${u.label}: ${u.names.slice(0, 5).join(', ')}${u.names.length > 5 ? ', …' : ''}`)
     .join(' · ')
 
   if (publishedCover) {
     throw new APIError(
-      `This image is the cover of a PUBLISHED project and cannot be deleted — the project page would fail to build. Replace the cover on that project first. In use as — ${detail}`,
+      `This image is the cover of a PUBLISHED project and cannot be ${verb} — the project page would fail to build. Replace the cover on that project first. In use as — ${detail}`,
       409,
     )
   }
 
   throw new APIError(
-    `This image is still in use and was not deleted. Remove it from these first, then try again. In use as — ${detail}`,
+    `This image is still in use and was not ${verb}. Remove it from these first, then try again. In use as — ${detail}`,
     409,
   )
+}
+
+/**
+ * THE IN-USE DELETE GUARD — FR-MEDIA-08. The HARD-delete path.
+ *
+ * WHY THIS IS NOT OPTIONAL: `image` is REQUIRED on `Project`, and
+ * `ProjectDetail.tsx`, `ProjectCard.tsx` and `lib/seo.ts` all dereference
+ * `project.image.*` WITHOUT GUARDS. Because `generateStaticParams` prerenders
+ * every project, deleting a cover does not degrade a page — it BREAKS THE BUILD.
+ *
+ * ⚠️ THIS HOOK ALONE IS NOT SUFFICIENT — see `mediaTrashGuard` below. The Admin
+ * Panel's ordinary Delete button never reaches it.
+ */
+export const mediaDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) => {
+  const { usages, publishedCover } = await collectMediaUsages(req, id)
+  if (usages.length === 0) return
+  throwMediaInUse(usages, publishedCover, 'deleted')
+}
+
+/**
+ * THE SAME CHECK ON THE TRASH PATH — and the Admin Panel only uses this one.
+ *
+ * 🔴 WITHOUT THIS HOOK THE DELETE GUARD IS LARGELY DECORATIVE. The Delete
+ * button issues `PATCH { deletedAt }` rather than `DELETE` (see the note on
+ * `isBeingTrashed`), so every refusal `mediaDeleteGuard` makes was reachable
+ * only by an admin who ticked "permanently delete" or called the REST API by
+ * hand. Measured against the local database, the PATCH path returned 200 and a
+ * homepage hero slide disappeared.
+ *
+ * ⚠️ IT REFUSES RATHER THAN SILENTLY UNTRASHING. Returning `data` with
+ * `deletedAt` stripped would make the admin's click appear to succeed while
+ * nothing happened — the same no-feedback failure the guard exists to remove.
+ */
+export const mediaTrashGuard: CollectionBeforeChangeHook = async ({
+  req,
+  data,
+  originalDoc,
+  operation,
+}) => {
+  if (operation !== 'update') return data
+  if (!isBeingTrashed(data as Record<string, unknown>, originalDoc)) return data
+
+  const id = (originalDoc as { id?: unknown } | undefined)?.id
+  if (!id) return data
+
+  const { usages, publishedCover } = await collectMediaUsages(req, id)
+  if (usages.length === 0) return data
+  throwMediaInUse(usages, publishedCover, 'moved to trash')
 }
 
 /**
@@ -207,7 +387,19 @@ export const mediaDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) 
  * Settings first, which is the intended way to take a video off the site
  * WITHOUT destroying the asset.
  */
-export const videoDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) => {
+const collectVideoUsages = async (
+  req: Parameters<CollectionBeforeDeleteHook>[0]['req'],
+  id: unknown,
+): Promise<Usage[]> => {
+  const usages: Usage[] = []
+
+  /** A relation at depth 0 is an id string; a populated read gives an object.
+   *  Normalised so the guard never depends on the caller's depth. */
+  const refId = (value: unknown): string =>
+    value && typeof value === 'object'
+      ? String((value as { id?: unknown }).id ?? '')
+      : String(value ?? '')
+
   try {
     const settings = await req.payload.findGlobal({
       slug: 'site-settings',
@@ -215,22 +407,125 @@ export const videoDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) 
       overrideAccess: true,
       req,
     })
-    // `heroVideos` is a hasMany upload: at depth 0 it is an ARRAY of ids, but
-    // a populated read would give objects. Both shapes are normalised here so
-    // the guard does not depend on the caller's depth.
+
+    // ---- 1. The legacy ordered hero list. Unchanged behaviour. ----
     const refs = (settings as { heroVideos?: unknown } | null)?.heroVideos
-    const ids = (Array.isArray(refs) ? refs : []).map((r) =>
-      r && typeof r === 'object' ? String((r as { id?: unknown }).id ?? '') : String(r ?? ''),
-    )
-    if (ids.some((v) => v && v === String(id))) {
-      throw new APIError(
-        'This video is one of the site’s active hero videos and cannot be deleted — the website would silently lose it. Remove it from Hero Videos in Site Settings first (that takes it off the site without destroying the file), then delete it here.',
-        409,
-      )
+    const legacyIds = (Array.isArray(refs) ? refs : []).map(refId)
+    if (legacyIds.some((v) => v && v === String(id))) {
+      usages.push({ label: 'Hero Videos (Site Settings)', names: ['active hero video'] })
+    }
+
+    /**
+     * ---- 2. THE UNIFIED HERO MEDIA LIST — THIS CHECK WAS MISSING. ----
+     *
+     * 🔴 A REAL SILENT-LOSS BUG, not a hypothetical. `site-settings.heroMedia`
+     * introduced a SECOND place a video can be referenced from, and this guard
+     * still only knew about the first. The FK is `ON DELETE set null`, so
+     * deleting a video used by a `kind: 'video'` row raised nothing: the row
+     * survived with a null relation, `heroMediaOrUndefined()` dropped it as
+     * unresolvable, and the homepage hero quietly lost a slide — or fell back
+     * to the legacy list — with no error, no warning and nothing in any log.
+     *
+     * That is precisely the failure this guard was written to make impossible,
+     * reintroduced by a new field. The row's title is reported so an admin can
+     * find it in a long list.
+     */
+    const heroMedia = (settings as { heroMedia?: unknown } | null)?.heroMedia
+    if (Array.isArray(heroMedia)) {
+      const hits: string[] = []
+      heroMedia.forEach((row, i) => {
+        if (!row || typeof row !== 'object') return
+        const r = row as { video?: unknown; title?: unknown }
+        if (refId(r.video) === String(id)) {
+          hits.push(typeof r.title === 'string' && r.title.trim() ? r.title.trim() : `row ${i + 1}`)
+        }
+      })
+      if (hits.length) usages.push({ label: 'Hero Media (Site Settings)', names: hits })
     }
   } catch (err) {
     // A genuine 409 must propagate; only a missing/unreadable global is ignored,
     // which is the fresh-database case the logo guard already tolerates.
     if (err instanceof APIError) throw err
   }
+
+  /**
+   * ---- 3. A PROJECT'S VIDEO LIST — THIS CHECK WAS MISSING TOO. ----
+   *
+   * Same bug, third reference site. `projects.videos[].video` is an array
+   * sub-field, so Payload's dotted-path `where` covers every row of every
+   * project in one query. `trash: true` because a trashed project still holds
+   * its reference and restoring it must not resurrect a project whose video
+   * was destroyed in the meantime — the same reasoning the cover guard
+   * already applies.
+   */
+  try {
+    const inProjects = await req.payload.find({
+      collection: 'projects',
+      where: { 'videos.video': { equals: id } },
+      limit: 25,
+      depth: 0,
+      overrideAccess: true,
+      trash: true,
+      req,
+      select: { name: true, slug: true },
+    })
+    if (inProjects.totalDocs > 0) {
+      usages.push({
+        label: 'project videos',
+        names: inProjects.docs.map((d) => String((d as { name?: string }).name ?? d.id)),
+      })
+    }
+  } catch {
+    // The column may not exist on a database migrated only partway.
+  }
+
+  return usages
+}
+
+/**
+ * 🔴 STILL A HARD REFUSAL RATHER THAN A WARNING, and still for the original
+ * reason: nulling the relation produces no error anywhere, so the admin who did
+ * it gets no feedback and the symptom is indistinguishable from "the feature is
+ * broken". The recoverable path is named in the message — remove the reference
+ * first, which takes the video off the site WITHOUT destroying the asset.
+ */
+const throwVideoInUse = (usages: Usage[], verb: string): never => {
+  const detail = usages
+    .map((u) => `${u.label}: ${u.names.slice(0, 5).join(', ')}${u.names.length > 5 ? ', …' : ''}`)
+    .join(' · ')
+
+  throw new APIError(
+    `This video is still in use and was not ${verb} — the website would silently lose it. Remove it from these first (that takes it off the site without destroying the file), then try again. In use as — ${detail}`,
+    409,
+  )
+}
+
+/** The HARD-delete path. See `videoTrashGuard` for the one the admin UI uses. */
+export const videoDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) => {
+  const usages = await collectVideoUsages(req, id)
+  if (usages.length === 0) return
+  throwVideoInUse(usages, 'deleted')
+}
+
+/**
+ * THE TRASH PATH — the one the Admin Panel's Delete button actually takes.
+ * See the note on `isBeingTrashed` and on `mediaTrashGuard`; without this, a
+ * video in use by `heroVideos`, `heroMedia[]` or `projects.videos[]` could be
+ * trashed with a 200 and the website would silently lose it.
+ */
+export const videoTrashGuard: CollectionBeforeChangeHook = async ({
+  req,
+  data,
+  originalDoc,
+  operation,
+}) => {
+  if (operation !== 'update') return data
+  if (!isBeingTrashed(data as Record<string, unknown>, originalDoc)) return data
+
+  const id = (originalDoc as { id?: unknown } | undefined)?.id
+  if (!id) return data
+
+  const usages = await collectVideoUsages(req, id)
+  if (usages.length === 0) return data
+  throwVideoInUse(usages, 'moved to trash')
 }

@@ -36,6 +36,10 @@ export const resetTestDatabase = async (payload: Payload): Promise<void> => {
     'payload_jobs_stats',
     'leads',
     'projects',
+    // Listed BEFORE `media`, which it references via `cover`. CASCADE would
+    // reach it anyway, but children-before-parents is the rule this array
+    // already follows — see the `videos` note below.
+    'blog_posts',
     'testimonials',
     'faqs',
     'statistics',

@@ -2,7 +2,7 @@ import type { CollectionConfig } from 'payload'
 
 import { anyone, isAdmin, isAdminField, serverOnlyField } from '@/access'
 import { auditAfterChange, auditAfterDelete } from '@/hooks/audit'
-import { captureReplacedFile, stampUploadedBy, videoDeleteGuard } from '@/hooks/mediaGuards'
+import { captureReplacedFile, stampUploadedBy, videoDeleteGuard, videoTrashGuard } from '@/hooks/mediaGuards'
 import { applyUploadGuardValues, videoUploadGuard } from '@/hooks/uploadGuard'
 
 /**
@@ -131,7 +131,7 @@ export const Videos: CollectionConfig = {
 
   hooks: {
     beforeOperation: [videoUploadGuard],
-    beforeChange: [applyUploadGuardValues, stampUploadedBy],
+    beforeChange: [videoTrashGuard, applyUploadGuardValues, stampUploadedBy],
     afterChange: [captureReplacedFile, auditAfterChange],
     // Blocks deleting the video that `site-settings.video` currently points at.
     beforeDelete: [videoDeleteGuard],

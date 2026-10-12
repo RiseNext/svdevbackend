@@ -3,7 +3,7 @@ import type { CollectionConfig } from 'payload'
 import { anyone, isAdmin, isAdminField, serverOnlyField } from '@/access'
 import { LIMITS } from '@/lib/constants'
 import { auditAfterChange, auditAfterDelete } from '@/hooks/audit'
-import { captureReplacedFile, mediaDeleteGuard, stampUploadedBy } from '@/hooks/mediaGuards'
+import { captureReplacedFile, mediaDeleteGuard, mediaTrashGuard, stampUploadedBy } from '@/hooks/mediaGuards'
 import { applyUploadGuardValues, imageUploadGuard } from '@/hooks/uploadGuard'
 
 /**
@@ -143,7 +143,7 @@ export const Media: CollectionConfig = {
 
   hooks: {
     beforeOperation: [imageUploadGuard],
-    beforeChange: [applyUploadGuardValues, stampUploadedBy],
+    beforeChange: [mediaTrashGuard, applyUploadGuardValues, stampUploadedBy],
     afterChange: [captureReplacedFile, auditAfterChange],
     beforeDelete: [mediaDeleteGuard],
     afterDelete: [auditAfterDelete],

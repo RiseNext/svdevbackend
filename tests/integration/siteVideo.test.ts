@@ -233,9 +233,48 @@ describe('site-settings.heroVideos is an ORDERED hasMany upload', () => {
     expect(f.hasMany).toBe(true)
   })
 
-  it('the singular `video` field is GONE — one mechanism, not two', () => {
+  it('the singular TOP-LEVEL `video` field is GONE — one mechanism, not two', () => {
     const g = payload.config.globals.find((x) => x.slug === 'site-settings')!
-    expect(JSON.stringify(g.fields)).not.toContain('"name":"video"')
+
+    /* 🔴 THIS ASSERTION WAS TIGHTENED, NOT RELAXED, AND THE DISTINCTION
+       MATTERS. It used to be `JSON.stringify(g.fields)` must not contain
+       `"name":"video"` — a substring search over the ENTIRE field tree,
+       including nested rows.
+
+       What it is actually guarding is the removal of the old SINGULAR
+       `site-settings.video` upload from d40bad6, which `heroVideos` replaced:
+       two mechanisms for one job, one of them unused. That concern is about a
+       TOP-LEVEL field on the global.
+
+       `heroMedia` now has a row subfield legitimately named `video` — the
+       upload relation used when a row's `kind` is `'video'` — and the loose
+       search matched it. Renaming that subfield to dodge a string match would
+       have contorted the schema to satisfy the test rather than the reverse,
+       and `video` is the correct name for it.
+
+       So the search now walks tabs and groups (where a top-level field can
+       hide) but DELIBERATELY STOPS AT ARRAYS, because a field inside an array
+       row is scoped to that row and is not a second top-level mechanism. The
+       old field would still be caught: it sat in a tab, not in an array. */
+    const topLevelNames = (fields: unknown[]): string[] =>
+      fields.flatMap((f) => {
+        const field = f as {
+          type?: string
+          tabs?: { fields: unknown[] }[]
+          fields?: unknown[]
+          name?: string
+        }
+        if (field.tabs) return field.tabs.flatMap((t) => topLevelNames(t.fields))
+        // Stop here: an array's subfields are row-scoped, not top-level.
+        if (field.type === 'array') return field.name ? [field.name] : []
+        if (field.name) return [field.name]
+        if (field.fields) return topLevelNames(field.fields)
+        return []
+      })
+
+    expect(topLevelNames(g.fields)).not.toContain('video')
+    // And the replacement is still the one that is there.
+    expect(topLevelNames(g.fields)).toContain('heroVideos')
   })
 
   it('carries no placement/carousel configuration', () => {

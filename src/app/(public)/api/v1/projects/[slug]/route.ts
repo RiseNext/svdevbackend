@@ -29,11 +29,35 @@ const handler = async (req: Request, _ctx: { requestId: string }) => {
     throw notFound('That project could not be found.')
   }
 
+  /**
+   * 🔴 DEPTH 2, RAISED FROM 1 — AND THE SECOND HOP IS WHAT `videos` NEEDS.
+   *
+   * `projects.videos[].video` -> `videos.poster` -> `media` is TWO relation
+   * hops, exactly like `site-settings.heroVideos` -> `videos.poster` ->
+   * `media`, which is why that route has been on depth 2 since the hero
+   * shipped. At depth 1 the poster arrives as a bare id, the serialiser cannot
+   * build its URL, and an uploaded project video renders with no still frame —
+   * a quiet degradation with a 200 response and nothing in any log.
+   *
+   * ⚠️ RAISING IT DOES NOT WIDEN THE RESPONSE, and that is not an assumption —
+   * it is the same reasoning already recorded on the site-settings route and it
+   * is pinned by a test here. `defaultPopulate` on every upload collection caps
+   * the populated shape (`media` to the four ImageRef keys, `documents` to
+   * `{filename,url,title}`, `videos` to `{filename,url,title,poster}`), and
+   * `toPublicProject` emits a hand-built allow-list regardless. So `image`,
+   * `gallery`, `layoutImage`, `locationMap`, `logo` and `brochure` resolve
+   * exactly as before, no join fans out, and no internal field such as
+   * `uploadedBy` can reach a populated relation. `maxDepth: 3` in the config
+   * leaves headroom.
+   *
+   * A contract test asserts the full detail payload for a project WITHOUT
+   * videos is byte-identical to the depth-1 response.
+   */
   const doc = await publicFindOne({
     collection: 'projects',
     where: { slug: { equals: slug } },
     select: PUBLIC_PROJECT_SELECT,
-    depth: 1,
+    depth: 2,
   })
 
   if (!doc) throw notFound('That project could not be found.')

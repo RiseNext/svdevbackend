@@ -29,6 +29,48 @@ services:
       timeout: 5s
       retries: 20
 
+  # ===========================================================================
+  # THE TEST DATABASE — a SECOND, separate service, and it has to be.
+  #
+  # 🔴 WHY IT IS NOT THE `postgres` SERVICE ABOVE. `tests/resetDb.ts` TRUNCATES
+  # thirteen tables on every run and refuses to do so unless the URL matches
+  # BOTH `sv_test` AND `:5433`. Pointing the suite at the dev sandbox would
+  # destroy the data a developer is looking at in the admin — which is exactly
+  # what that guard exists to prevent. `.env.test` has always named
+  # `postgres://postgres:test@localhost:5433/sv_test`; until now NOTHING in this
+  # repository served it, so the integration suite could not run at all.
+  #
+  # ⚠️ PORT 5433 ON THE HOST, 5432 IN THE CONTAINER. Postgres always listens on
+  # 5432 inside its own namespace; 5433 is the host-side mapping the suite's
+  # guard checks for. Changing the left-hand number alone is what breaks it.
+  #
+  # 🔴 `tmpfs`, NOT A NAMED VOLUME — DELIBERATELY. The suite truncates at the
+  # start of every run, so persistence buys nothing and costs the one failure
+  # mode worth avoiding: a half-migrated schema surviving a crash and making the
+  # next run fail for a reason that is not in the code. A container restart is a
+  # guaranteed-clean database. It is also materially faster, since the whole
+  # store lives in RAM.
+  #
+  # The password is `test` to match `.env.test`, which is committed and contains
+  # only dummy values. It is not a secret and must not be treated as one.
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: sv-test-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: sv_test
+    ports:
+      - '5433:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d sv_test']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 # =============================================================================
 # THERE IS NO LOCAL OBJECT-STORAGE SERVICE, AND THAT IS DELIBERATE.
 #

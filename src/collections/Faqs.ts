@@ -41,7 +41,9 @@ export const Faqs: CollectionConfig = {
 
   hooks: {
     afterChange: [auditAfterChange, revalidateContent('faqs', ['/', '/contact'])],
-    afterDelete: [auditAfterDelete],
+    // 🔶 PRE-EXISTING gap, same as `testimonials` — see the note there. Deleting
+    // an FAQ left it answering on / and /contact until the ISR floor expired.
+    afterDelete: [auditAfterDelete, revalidateContent('faqs', ['/', '/contact'])],
   },
 
   fields: [
