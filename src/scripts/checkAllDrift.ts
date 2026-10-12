@@ -6,7 +6,7 @@ import { ICON_NAMES, iconsNotRenderableByFrontend } from '@/lib/icons'
 import { ENV_KEYS } from '@/schemas/env'
 
 /**
- * THREE CI GUARDS AGAINST SILENT DRIFT.
+ * SIX CI GUARDS AGAINST SILENT DRIFT.
  *
  * Each protects a fact that lives in ANOTHER FILE — in two cases, in another
  * REPOSITORY — where nothing else would catch a change.
@@ -100,6 +100,106 @@ const checkContract = () => {
   pass(`public contract: byte-identical (${a.length} bytes)`)
 }
 
+/**
+ * 2b. THE BLOG CONTRACT — the same guard, on a SECOND file.
+ *
+ * 🔴 WHY A SECOND CHECK RATHER THAN WIDENING THE FIRST. The frontend keeps its
+ * blog types in `src/types/blog.ts`, separate from `content.ts`, and says why:
+ * "`types/content.ts` is the contract for everything already shipping against a
+ * live backend. A brand-new collection gets its own file so that adding the blog
+ * cannot destabilise the project and site-settings reads." Vendoring it as a
+ * second file mirrors that, and — more importantly — leaves the EXISTING
+ * byte-identical pair untouched. Concatenating the two into one vendored file
+ * would have broken a gate that currently passes.
+ *
+ * Without this check the blog contract is the one part of the public API with no
+ * drift coverage at all: the frontend could rename a field and the backend would
+ * keep serving the old shape, with `fallback: []` in the data layer making the
+ * result an empty page rather than an error.
+ */
+const checkBlogContract = () => {
+  const frontendFile = path.join(FRONTEND, 'src/types/blog.ts')
+  const vendored = path.join(ROOT, 'src/types/frontend-contract-blog.ts')
+
+  if (!existsSync(frontendFile)) {
+    console.log('  skip  blog contract drift — svfrontend not present beside svbackend')
+    return
+  }
+  if (!existsSync(vendored)) return fail('src/types/frontend-contract-blog.ts is missing')
+
+  const a = readFileSync(frontendFile)
+  const b = readFileSync(vendored)
+
+  if (!a.equals(b)) {
+    return fail(
+      'the vendored BLOG contract has DRIFTED from svfrontend/src/types/blog.ts. ' +
+        'Re-copy it and re-run the contract tests — do NOT edit the frontend file to match.',
+    )
+  }
+  pass(`blog contract: byte-identical (${a.length} bytes)`)
+}
+
+/**
+ * 2c. THE HERO-MEDIA CONTRACT — the same guard again, on a third file.
+ *
+ * `heroMedia` is a DISCRIMINATED UNION whose `kind` values are also a
+ * Postgres enum on this side. Drift here is the worst of the three: a renamed
+ * variant would make the backend emit a `kind` the hero has no branch for, and
+ * the slide would silently vanish from the homepage's first screen with the API
+ * still returning 200.
+ */
+const checkHeroContract = () => {
+  const frontendFile = path.join(FRONTEND, 'src/types/heroMedia.ts')
+  const vendored = path.join(ROOT, 'src/types/frontend-contract-hero.ts')
+
+  if (!existsSync(frontendFile)) {
+    console.log('  skip  hero contract drift — svfrontend not present beside svbackend')
+    return
+  }
+  if (!existsSync(vendored)) return fail('src/types/frontend-contract-hero.ts is missing')
+
+  const a = readFileSync(frontendFile)
+  const b = readFileSync(vendored)
+
+  if (!a.equals(b)) {
+    return fail(
+      'the vendored HERO contract has DRIFTED from svfrontend/src/types/heroMedia.ts. ' +
+        'Re-copy it and re-run the contract tests — do NOT edit the frontend file to match.',
+    )
+  }
+  pass(`hero contract: byte-identical (${a.length} bytes)`)
+}
+
+/**
+ * 2d. THE PROJECT-VIDEO CONTRACT — the same guard, on a fourth file.
+ *
+ * `projects.videos` is a discriminated union whose `kind` values are also a
+ * Postgres enum on this side. Drift means the backend emits a `kind` the
+ * project page has no branch for, and the pane vanishes from a live project
+ * page with the API still returning 200.
+ */
+const checkProjectMediaContract = () => {
+  const frontendFile = path.join(FRONTEND, 'src/types/projectMedia.ts')
+  const vendored = path.join(ROOT, 'src/types/frontend-contract-project-media.ts')
+
+  if (!existsSync(frontendFile)) {
+    console.log('  skip  project-media contract drift — svfrontend not present beside svbackend')
+    return
+  }
+  if (!existsSync(vendored)) return fail('src/types/frontend-contract-project-media.ts is missing')
+
+  const a = readFileSync(frontendFile)
+  const b = readFileSync(vendored)
+
+  if (!a.equals(b)) {
+    return fail(
+      'the vendored PROJECT-MEDIA contract has DRIFTED from svfrontend/src/types/projectMedia.ts. ' +
+        'Re-copy it and re-run the contract tests — do NOT edit the frontend file to match.',
+    )
+  }
+  pass(`project-media contract: byte-identical (${a.length} bytes)`)
+}
+
 // ------------------------------------------------------------------ 3. env
 const checkEnvExample = () => {
   const example = path.join(ROOT, '.env.example')
@@ -132,6 +232,9 @@ const checkEnvExample = () => {
 console.log('\nDrift checks\n')
 checkIcons()
 checkContract()
+checkBlogContract()
+checkHeroContract()
+checkProjectMediaContract()
 checkEnvExample()
 
 if (failures > 0) {

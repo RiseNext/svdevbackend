@@ -33,9 +33,15 @@ import { getPayload, type CollectionSlug, type SelectType, type Where } from 'pa
 export const publishedWhere = (): Where => ({ _status: { equals: 'published' } })
 
 /** Collections a public handler is ALLOWED to read. `leads`, `users` and
- *  `audit-log` are absent by construction — there is no way to name them. */
+ *  `audit-log` are absent by construction — there is no way to name them.
+ *
+ *  ⚠️ `videos` IS ALSO ABSENT, AND DELIBERATELY SO. Hero videos reach the
+ *  public API only as a POPULATED RELATION on the `site-settings` global, via
+ *  `publicFindGlobal`. There is no public route that reads the collection
+ *  directly, so there is no reason to make it nameable here. */
 export type PublicReadableCollection =
   | 'projects'
+  | 'blog-posts'
   | 'testimonials'
   | 'faqs'
   | 'statistics'

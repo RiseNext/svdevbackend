@@ -6,6 +6,9 @@ import * as migration_20260922_020330_add_project_brochure from './20260922_0203
 import * as migration_20260922_073843_add_videos from './20260922_073843_add_videos';
 import * as migration_20260922_103833_hero_videos from './20260922_103833_hero_videos';
 import * as migration_20260930_044232_add_project_logo from './20260930_044232_add_project_logo';
+import * as migration_20261012_053106_add_blog_posts_and_promo_video from './20261012_053106_add_blog_posts_and_promo_video';
+import * as migration_20261012_054303_add_hero_media from './20261012_054303_add_hero_media';
+import * as migration_20261012_064113_add_project_videos from './20261012_064113_add_project_videos';
 
 export const migrations = [
   {
@@ -46,6 +49,21 @@ export const migrations = [
   {
     up: migration_20260930_044232_add_project_logo.up,
     down: migration_20260930_044232_add_project_logo.down,
-    name: '20260930_044232_add_project_logo'
+    name: '20260930_044232_add_project_logo',
+  },
+  {
+    up: migration_20261012_053106_add_blog_posts_and_promo_video.up,
+    down: migration_20261012_053106_add_blog_posts_and_promo_video.down,
+    name: '20261012_053106_add_blog_posts_and_promo_video',
+  },
+  {
+    up: migration_20261012_054303_add_hero_media.up,
+    down: migration_20261012_054303_add_hero_media.down,
+    name: '20261012_054303_add_hero_media',
+  },
+  {
+    up: migration_20261012_064113_add_project_videos.up,
+    down: migration_20261012_064113_add_project_videos.down,
+    name: '20261012_064113_add_project_videos'
   },
 ];

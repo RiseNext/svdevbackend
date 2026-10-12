@@ -1,5 +1,6 @@
 import type { Faq, SiteSetting, Statistic, Testimonial } from '@/payload-types'
 import type { ImageRef, Testimonial as PublicTestimonial, VideoRef } from '@/types/frontend-contract'
+import type { HeroMediaItem } from '@/types/frontend-contract-hero'
 import { coerceIcon } from '@/lib/icons'
 import { cloudinaryFileUrl } from '@/media/mediaUrl'
 
@@ -47,6 +48,15 @@ export type PublicSiteSettings = {
    * the reverse is not.
    */
   heroVideos?: VideoRef[]
+  /**
+   * The unified hero list — images, uploaded MP4s and YouTube, in admin order.
+   *
+   * 🔴 EMITTED ALONGSIDE `heroVideos`, NEVER INSTEAD OF IT. One hero video is
+   * live in production through the legacy field; the frontend prefers this list
+   * when it is non-empty and falls back to mapping `heroVideos` otherwise. That
+   * is what makes the field additive and the rollout migration-free.
+   */
+  heroMedia?: HeroMediaItem[]
 }
 
 /** One populated `videos` document -> `{ src, poster, title }`, or `undefined`
@@ -136,6 +146,128 @@ const heroVideosOrUndefined = (videos: SiteSetting['heroVideos']): VideoRef[] | 
     if (seen.has(ref.src)) continue
     seen.add(ref.src)
     out.push(ref)
+  }
+
+  return out.length > 0 ? out : undefined
+}
+
+/**
+ * THE UNIFIED HERO MEDIA LIST -> a DISCRIMINATED UNION, or OMITTED.
+ *
+ * 🔴 EVERY RULE `heroVideosOrUndefined` ESTABLISHED APPLIES HERE UNCHANGED, and
+ * deliberately so — this is the same contract widened to three kinds, not a new
+ * one:
+ *
+ *   · ORDER IS PRESERVED VERBATIM. Array index IS slideshow order, across all
+ *     three kinds. NOTHING here may sort — not by kind, not by title.
+ *   · PER-ENTRY BOTH-OR-NOTHING. One unresolvable row must not blank a working
+ *     hero, so a bad row is dropped and the rest are emitted.
+ *   · IF THAT LEAVES NOTHING, THE KEY ITSELF IS OMITTED — never `[]`, never
+ *     `null`. The frontend then falls back to `heroVideos`, which is what makes
+ *     this field additive rather than a flag day.
+ *   · IT OMITS RATHER THAN THROWS. `site-settings` feeds EVERY page; a throw
+ *     here would turn one unpopulated relation into a site-wide 500.
+ *
+ * 🔴 DEDUPED PER KIND BY ITS OWN IDENTITY. `HeroVideoStage` keys slides by a
+ * stable string, and two identical entries would collide as React keys and
+ * misbehave in a way that looks like a rendering bug rather than a data one.
+ * An image and a video may legitimately share nothing, so the key is
+ * `kind:identity` rather than a bare src.
+ */
+const heroMediaOrUndefined = (rows: SiteSetting['heroMedia']): HeroMediaItem[] | undefined => {
+  if (!Array.isArray(rows) || rows.length === 0) return undefined
+
+  const out: HeroMediaItem[] = []
+  const seen = new Set<string>()
+
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const title = typeof row.title === 'string' ? row.title.trim() : ''
+
+    // ---- A PHOTOGRAPH ----
+    if (row.kind === 'image') {
+      // A bare id string means the relation was not populated deeply enough.
+      // Never guess a URL from an id — drop the row instead.
+      if (!row.image || typeof row.image !== 'object') continue
+      let image: ImageRef
+      try {
+        image = toImageRef(row.image, 'heroMedia[].image')
+      } catch {
+        continue
+      }
+      if (!image.src) continue
+      if (seen.has(`image:${image.src}`)) continue
+      seen.add(`image:${image.src}`)
+      out.push({
+        kind: 'image',
+        src: image.src,
+        // `alt` rides along from the Media library entry, which is why an image
+        // hero needs no second field to be accessible.
+        alt: image.alt,
+        width: image.width,
+        height: image.height,
+        ...(title ? { title } : {}),
+      })
+      continue
+    }
+
+    // ---- AN UPLOADED MP4 ----
+    if (row.kind === 'video') {
+      // 🔴 THE SAME `toVideoRef` THE LEGACY FIELD USES. Reusing it is what
+      // guarantees an uploaded hero video resolves to byte-identically the same
+      // `{src, poster}` here as it does through `heroVideos` — one definition,
+      // so the two cannot drift. It also inherits the rule that a video missing
+      // its required poster or title is dropped rather than half-emitted.
+      const ref = toVideoRef(row.video)
+      if (!ref) continue
+      if (seen.has(`video:${ref.src}`)) continue
+      seen.add(`video:${ref.src}`)
+      out.push({
+        kind: 'video',
+        src: ref.src,
+        poster: ref.poster,
+        // The row's own title wins over the asset's internal label: the asset
+        // name is for the library, this one is for the visitor.
+        ...(title ? { title } : ref.title ? { title: ref.title } : {}),
+      })
+      continue
+    }
+
+    // ---- A YOUTUBE LINK ----
+    if (row.kind === 'youtube') {
+      const youtubeUrl = typeof row.youtubeUrl === 'string' ? row.youtubeUrl.trim() : ''
+      if (!youtubeUrl) continue
+
+      /* 🔴 THE POSTER IS MANDATORY AND THE ROW IS DROPPED WITHOUT IT. The field
+         validator already refuses to SAVE such a row, so reaching here means
+         the data predates the validator or arrived another way. Emitting a
+         YouTube slide with no poster would render an empty hero panel, because
+         YouTube's own thumbnail host is deliberately absent from svfrontend's
+         image allow-list. An absent slide is better than a blank one. */
+      if (!row.poster || typeof row.poster !== 'object') continue
+      let poster: ImageRef
+      try {
+        poster = toImageRef(row.poster, 'heroMedia[].poster')
+      } catch {
+        continue
+      }
+      if (!poster.src) continue
+      if (seen.has(`youtube:${youtubeUrl}`)) continue
+      seen.add(`youtube:${youtubeUrl}`)
+      out.push({
+        kind: 'youtube',
+        // 🔴 VERBATIM, never reduced to an id — `youtubeId()` on the frontend
+        // is the single arbiter, and it accepts every share-button form.
+        youtubeUrl,
+        poster: poster.src,
+        ...(title ? { title } : {}),
+      })
+      continue
+    }
+
+    // An unknown `kind` is dropped rather than guessed at. `select` enums are
+    // DB-level, so this is only reachable if the enum gained a value the
+    // serialiser has not been taught — which must not render as something else.
   }
 
   return out.length > 0 ? out : undefined
@@ -267,6 +399,12 @@ export const toPublicSiteSettings = (doc: SiteSetting): PublicSiteSettings => {
   // this endpoint returned before the feature existed.
   put(out, 'heroVideos', heroVideosOrUndefined(doc.heroVideos))
 
+  // The unified list. `put` omits the key when nothing resolves, which is what
+  // makes the response byte-identical to before this field existed for an
+  // admin who has not populated it — and what lets the frontend fall back to
+  // `heroVideos` by simply asking whether the key is there.
+  put(out, 'heroMedia', heroMediaOrUndefined(doc.heroMedia))
+
   return out as unknown as PublicSiteSettings
 }
 
@@ -294,6 +432,20 @@ export const PUBLIC_SITE_SETTINGS_SELECT = {
   // ids and `heroVideos` would SILENTLY never appear — the exact failure mode
   // that kept `projects.brochure` invisible until it was added to its select.
   heroVideos: true,
+  /**
+   * 🔴 SELECTED SO THE THREE UPLOAD RELATIONS INSIDE EACH ROW RESOLVE.
+   * `select` is include-mode: without this the serialiser receives nothing for
+   * `heroMedia` and the key is silently omitted — which looks exactly like "the
+   * admin has not configured a hero yet" and is the failure that kept
+   * `projects.brochure` invisible in production.
+   *
+   * ⚠️ `true` RATHER THAN A NESTED OBJECT, DELIBERATELY. Selecting the whole
+   * array lets `depth: 1` populate `image`, `video` and `poster` through each
+   * collection's own `defaultPopulate`, which is where `videos` resolves
+   * `{filename, url, title, poster}`. A hand-written nested select would have
+   * to restate those and would drift from them.
+   */
+  heroMedia: true,
 } as const
 
 // ---------------------------------------------------------------------------

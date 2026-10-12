@@ -259,6 +259,29 @@ export const LIMITS = {
   testimonialRole: 120,
   testimonialBody: 2000,
   userName: 120,
+  /**
+   * A pasted media URL — `projects.promoVideo.youtubeUrl`,
+   * `site-settings.heroMedia[].youtubeUrl` and `blog-posts.video.youtubeUrl`.
+   *
+   * 500 rather than a tighter number because the value stored is whatever the
+   * Share button produced, tracking tail and all: a watch URL carrying `?si=`,
+   * `&t=`, `&list=` and a UTM set runs well past 200 characters, and truncating
+   * one silently is indistinguishable from a typo at the render site. It is
+   * still short enough that the column cannot be used as free storage.
+   */
+  url: 500,
+  /** `blog-posts.title` — a sentence, not a name, so longer than `projectName`. */
+  postTitle: 200,
+  /** `blog-posts.excerpt` — card copy and the meta description. */
+  postExcerpt: 400,
+  /** One paragraph of `blog-posts.body`, matching `descriptionParagraph`. */
+  postParagraph: 5000,
+  /** `blog-posts.topic` — a short free-text chip label, not a taxonomy. */
+  postTopic: 60,
+  /** `blog-posts.author` — a byline. */
+  postAuthor: 120,
+  /** A printed running time, e.g. `12:40` or `1:05:22`. */
+  mediaDuration: 16,
 } as const
 
 /** Every repeatable list is capped. Prevents an accidental paste of 10 000 rows. */

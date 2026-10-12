@@ -500,6 +500,245 @@ export const Projects: CollectionConfig = {
                   'The project brochure as a PDF, chosen from Documents. Upload it under Media → Documents first, or use “Create New” here. ⚠️ NOT YET RENDERED ON THE WEBSITE: this field is editable now so brochures can be collected, but the public project page has no download link for it yet, so setting it changes nothing visible to a visitor.',
               },
             },
+            {
+              /**
+               * THE PROJECT'S PROMOTION VIDEO — one pasted YouTube link.
+               *
+               * 🔴 A GROUP OF TWO TEXT FIELDS, NOT AN UPLOAD RELATION. The
+               * frontend's resolver (`svfrontend/src/lib/projectVideo.ts`)
+               * accepts `promoVideo` as either a bare string or an object
+               * keyed `youtubeUrl | url | href | src`, with an optional
+               * `duration`. A group emitting `{ youtubeUrl, duration }` is the
+               * narrowest shape that satisfies it, and it needs no new
+               * collection: a YouTube link is a URL, not an uploaded asset.
+               *
+               * 🔴 `youtubeUrl` IS STORED EXACTLY AS PASTED, AND THAT IS THE
+               * CONTRACT. `types/blog.ts` sets out the reasoning at length: a
+               * field labelled "video id" gets a full URL pasted into it on the
+               * first day, and then nothing works. The frontend parses the id
+               * out with `youtubeId()`, which accepts watch URLs, `youtu.be`,
+               * `/shorts/`, `/embed/`, `/live/` and the whole tracking tail.
+               *
+               * ⚠️ NO SERVER-SIDE URL VALIDATION, DELIBERATELY. `youtubeId()`
+               * is the single switch at the render site and it already drops the
+               * pane for anything it cannot read an id out of. Rejecting here as
+               * well would mean two places to look when a video does not appear,
+               * and a stricter backend pattern than the frontend's would reject
+               * links the site can actually play. The trim below is the only
+               * normalisation: a whitespace-only paste is nothing, not a video.
+               *
+               * ⚠️ EMITTED ON BOTH `/projects` AND `/projects/{slug}`. The
+               * frontend reads whichever record it has to hand — see the note on
+               * `projectVideo()` — so leaving it off the card payload would make
+               * the homepage deck depend on the detail fetch alone. Both SELECTs
+               * and both serialisers carry it.
+               */
+              name: 'promoVideo',
+              label: 'Promotion video',
+              type: 'group',
+              admin: {
+                description:
+                  'An optional YouTube video for this project, shown beside the photographs on the homepage card. Paste the link exactly as YouTube’s Share button gives it — a watch link, a youtu.be link or a Shorts link all work. Leave empty for no video.',
+              },
+              fields: [
+                {
+                  name: 'youtubeUrl',
+                  label: 'YouTube link',
+                  type: 'text',
+                  maxLength: LIMITS.url,
+                  hooks: {
+                    beforeValidate: [
+                      ({ value }) => (typeof value === 'string' ? value.trim() : value),
+                    ],
+                  },
+                  admin: {
+                    description:
+                      'Paste the YouTube link. Do NOT shorten it to just the video id by hand — that is the step that gets a character wrong, and a wrong id is a card that looks right and plays nothing.',
+                  },
+                },
+                {
+                  name: 'duration',
+                  label: 'Running time',
+                  type: 'text',
+                  maxLength: LIMITS.mediaDuration,
+                  admin: {
+                    description:
+                      'Optional. The running time as it should be printed on the badge, e.g. “2:14”. Leave empty for no badge — do not guess at one. YouTube does not reveal duration without an API key, so this is typed by hand.',
+                  },
+                },
+              ],
+            },
+            {
+              /**
+               * 🔴 THE PROJECT'S FULL VIDEO LIST — uploaded MP4s and YouTube
+               * links, in one ordered sequence, shown in a dedicated section on
+               * the project's own page.
+               *
+               * ─── WHY THIS IS SEPARATE FROM `promoVideo` ABOVE ─────────────
+               * They answer two different questions and both answers are
+               * needed. `promoVideo` is the SINGLE video that fills the pane on
+               * the homepage card — one project, one chosen headline video.
+               * This is the whole set on the detail page. Collapsing them into
+               * one field would force a choice between a card that tries to
+               * render six videos (a worse card) and a page that can only show
+               * one (a worse page).
+               *
+               * 🔴 `promoVideo` IS THEREFORE UNTOUCHED AND STILL SERIALISED
+               * EXACTLY AS BEFORE. This field is additive; a project that has
+               * only a `promoVideo` behaves identically to before it existed.
+               *
+               * ─── WHY AN `array` AND NOT A RELATION ────────────────────────
+               * The same reason as `site-settings.heroMedia`: a YouTube entry
+               * is a pasted URL with no upload row to point at, so
+               * `relationTo: ['videos']` could express one of the two kinds and
+               * would need a second field beside it for the other — two sources
+               * of order for one list. An array holds both, carries a native
+               * `_order` column, and is the pattern already proven in this
+               * codebase.
+               *
+               * ⚠️ NO IMAGES HERE. `gallery` already holds multiple
+               * photographs per project and is deliberately left alone. Images
+               * and videos have different controls, loading costs and
+               * accessibility needs; one list would mean the photo stepper and
+               * the video grid competing over a single ordering.
+               *
+               * ⚠️ `admin.condition` BELOW IS A UI AFFORDANCE, NOT VALIDATION.
+               * It hides the irrelevant field; it does NOT stop the REST API
+               * storing a `youtubeUrl` on a `kind: 'video'` row. `validate` on
+               * this array is the enforcement.
+               */
+              name: 'videos',
+              label: 'Videos',
+              type: 'array',
+              maxRows: MAX_ARRAY_ROWS,
+              admin: {
+                description:
+                  'Videos for this project’s own page, in order — drag to reorder. Mix uploaded MP4s and YouTube links freely. Leave empty for no video section. This is separate from “Promotion video” above, which is the single video shown on the homepage card.',
+                initCollapsed: true,
+                components: {
+                  RowLabel: '@/components/admin/ProjectVideoRowLabel#ProjectVideoRowLabel',
+                },
+              },
+              /**
+               * EACH ROW MUST CARRY THE SOURCE ITS `kind` PROMISES.
+               *
+               * 🔴 THIS IS THE REAL GUARD, because `admin.condition` is not
+               * one. A row whose kind and source disagree is unrenderable: the
+               * serialiser drops it, and the admin sees an entry in the list
+               * that never appears on the site with nothing to explain why.
+               *
+               * ⚠️ A YOUTUBE ROW REQUIRES A POSTER. YouTube's own thumbnails
+               * come from `i.ytimg.com`, which is deliberately NOT in
+               * svfrontend's `images.remotePatterns` — so without a poster from
+               * `media` there is nothing to show before the visitor clicks.
+               */
+              validate: (value: unknown): true | string => {
+                if (value === undefined || value === null) return true
+                if (!Array.isArray(value)) return 'Videos must be a list.'
+
+                for (const [i] of value.entries()) {
+                  const row = value[i] as Record<string, unknown> | null
+                  if (!row) continue
+                  const at = `Row ${i + 1}`
+
+                  if (row.kind === 'video' && !row.video) {
+                    return `${at}: choose an uploaded video, or change its type.`
+                  }
+                  if (row.kind === 'youtube') {
+                    const url = typeof row.youtubeUrl === 'string' ? row.youtubeUrl.trim() : ''
+                    if (!url) return `${at}: paste a YouTube link, or change its type.`
+                    if (!row.poster) {
+                      return `${at}: a YouTube entry needs a poster image — YouTube's own thumbnail cannot be used here.`
+                    }
+                  }
+                }
+                return true
+              },
+              fields: [
+                {
+                  name: 'kind',
+                  label: 'Type',
+                  type: 'select',
+                  required: true,
+                  defaultValue: 'youtube',
+                  options: [
+                    { label: 'YouTube link', value: 'youtube' },
+                    { label: 'Uploaded video (MP4)', value: 'video' },
+                  ],
+                  admin: {
+                    description:
+                      'What this entry is. Choose first — the field you need appears below.',
+                  },
+                },
+                {
+                  /**
+                   * ⚠️ THE EXISTING `videos` COLLECTION — the SAME one
+                   * `site-settings.heroVideos` and `heroMedia` use. An uploaded
+                   * project video therefore inherits the MP4-only allow-list,
+                   * the 6 MB ceiling, `pasteURL: false`, the magic-byte sniff
+                   * and the required poster/title with NO new upload code, and
+                   * a video already in the library is reusable here rather than
+                   * needing a second upload.
+                   */
+                  name: 'video',
+                  label: 'Uploaded video',
+                  type: 'upload',
+                  relationTo: 'videos',
+                  admin: {
+                    condition: (_data, siblingData) => siblingData?.kind === 'video',
+                    description:
+                      'Choose a video from Media → Videos, or upload a new one. MP4, up to 6 MB, and it must already have a poster set there.',
+                  },
+                },
+                {
+                  name: 'youtubeUrl',
+                  label: 'YouTube link',
+                  type: 'text',
+                  maxLength: LIMITS.url,
+                  hooks: {
+                    beforeValidate: [
+                      ({ value }) => (typeof value === 'string' ? value.trim() : value),
+                    ],
+                  },
+                  admin: {
+                    condition: (_data, siblingData) => siblingData?.kind === 'youtube',
+                    description:
+                      'Paste the link exactly as YouTube’s Share button gives it — a watch link, a youtu.be link or a Shorts link all work.',
+                  },
+                },
+                {
+                  name: 'poster',
+                  label: 'Poster image',
+                  type: 'upload',
+                  relationTo: 'media',
+                  admin: {
+                    condition: (_data, siblingData) => siblingData?.kind === 'youtube',
+                    description:
+                      'REQUIRED for a YouTube entry — this is what fills the pane until someone presses play. Use a still from the video itself.',
+                  },
+                },
+                {
+                  name: 'duration',
+                  label: 'Running time',
+                  type: 'text',
+                  maxLength: LIMITS.mediaDuration,
+                  admin: {
+                    condition: (_data, siblingData) => siblingData?.kind === 'youtube',
+                    description:
+                      'Optional, and typed by hand — e.g. “2:14”. No value simply means no badge.',
+                  },
+                },
+                {
+                  name: 'title',
+                  type: 'text',
+                  maxLength: 200,
+                  admin: {
+                    description:
+                      'Optional caption, e.g. “Drone walkthrough, March 2026”. Also used as the video’s accessible name, so a screen-reader user hears it instead of “Video 2”.',
+                  },
+                },
+              ],
+            },
             // `brochureImages` is DEFERRED (principle P4): types/content.ts:98
             // declares it, but there are ZERO render sites anywhere in src/ and
             // 0 of 5 projects populate it. One field plus one migration adds it

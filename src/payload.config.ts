@@ -13,6 +13,7 @@ import { buildConfig } from 'payload'
 import sharp from 'sharp'
 
 import { AuditLog } from './collections/AuditLog'
+import { BlogPosts } from './collections/BlogPosts'
 import { Documents } from './collections/Documents'
 import { Faqs } from './collections/Faqs'
 import { Leads } from './collections/Leads'
@@ -181,6 +182,7 @@ export default buildConfig({
     Documents,
     Videos,
     Projects,
+    BlogPosts,
     Leads,
     Testimonials,
     Faqs,

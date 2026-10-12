@@ -4,3 +4,19 @@
 # Windows checkout rewrote this file to CRLF and the byte comparison could never
 # match. Pinning it to LF makes the two working copies identical on any platform.
 src/types/frontend-contract.ts text eol=lf
+
+# The blog contract is vendored and byte-compared the same way, from
+# svfrontend/src/types/blog.ts. It needs the identical pin for the identical
+# reason — see above. The frontend keeps the blog in its OWN file so that
+# "adding the blog cannot destabilise the project and site-settings reads", and
+# mirroring that split here is what lets the blog gain a checked contract
+# without touching the existing byte-identical one.
+src/types/frontend-contract-blog.ts text eol=lf
+
+# The hero-media contract, vendored from svfrontend/src/types/heroMedia.ts and
+# byte-compared the same way. Same pin, same reason.
+src/types/frontend-contract-hero.ts text eol=lf
+
+# The project-video contract, vendored from svfrontend/src/types/projectMedia.ts
+# and byte-compared the same way. Same pin, same reason.
+src/types/frontend-contract-project-media.ts text eol=lf

@@ -4,6 +4,7 @@ import type {
   Project as PublicProject,
   ProximityItem,
 } from '@/types/frontend-contract'
+import type { ProjectVideo } from '@/types/frontend-contract-project-media'
 import { coerceIcon } from '@/lib/icons'
 import { cloudinaryFileUrl } from '@/media/mediaUrl'
 
@@ -152,6 +153,158 @@ const brochureOrUndefined = (
   return { title, href }
 }
 
+/**
+ * THE PROMOTION VIDEO -> `{ youtubeUrl, duration? }`, or OMITTED.
+ *
+ * 🔴 `youtubeUrl` IS THE WHOLE SWITCH. A group field materialises in Postgres
+ * as two nullable columns, so an untouched group arrives as
+ * `{ youtubeUrl: null, duration: null }` — NOT as `undefined`. Emitting that
+ * verbatim would put `promoVideo: { youtubeUrl: null }` on every one of the
+ * four published projects, and the frontend's resolver would then hand a `null`
+ * to `youtubeId()` on every card. Keying the whole object off a non-empty URL
+ * is what keeps the no-video response byte-identical to the response this
+ * endpoint returned before the field existed.
+ *
+ * ⚠️ `duration` IS DROPPED WHEN BLANK rather than emitted as `null`: the
+ * frontend types it `duration?: string` and renders a badge for any truthy
+ * value, so `null` would be a shape it never agreed to carry.
+ *
+ * ⚠️ NO URL VALIDATION HERE EITHER. The field stores what was pasted and
+ * `youtubeId()` at the render site is the single arbiter — see the long note on
+ * the field in `collections/Projects.ts`. A link this serialiser cannot read is
+ * still a link the frontend might play, and silently dropping it would be a
+ * video that vanishes with nothing anywhere to explain why.
+ */
+const promoVideoOrUndefined = (
+  promoVideo: PayloadProject['promoVideo'],
+): { youtubeUrl: string; duration?: string } | undefined => {
+  if (!promoVideo || typeof promoVideo !== 'object') return undefined
+
+  const youtubeUrl = typeof promoVideo.youtubeUrl === 'string' ? promoVideo.youtubeUrl.trim() : ''
+  if (!youtubeUrl) return undefined
+
+  const duration = typeof promoVideo.duration === 'string' ? promoVideo.duration.trim() : ''
+  return duration ? { youtubeUrl, duration } : { youtubeUrl }
+}
+
+/**
+ * THE PROJECT'S VIDEO LIST -> a DISCRIMINATED UNION, or OMITTED.
+ *
+ * 🔴 EVERY RULE `heroMediaOrUndefined` ESTABLISHED APPLIES HERE UNCHANGED, and
+ * deliberately so — this is the same contract minus the image kind, not a new
+ * one:
+ *
+ *   · ORDER IS PRESERVED VERBATIM. Array index IS display order. NOTHING here
+ *     may sort.
+ *   · PER-ENTRY BOTH-OR-NOTHING. One unresolvable row must not blank a working
+ *     video section, so a bad row is dropped and the rest are emitted.
+ *   · IF THAT LEAVES NOTHING, THE KEY ITSELF IS OMITTED — never `[]`, never
+ *     `null`. That is what keeps a project with no videos byte-identical to the
+ *     response it returned before this field existed.
+ *   · IT OMITS RATHER THAN THROWS. `toImageRef` throws for a required project
+ *     cover because a broken one must fail loudly; an optional video list must
+ *     degrade to an absent section instead of a 500 on the project page.
+ *
+ * 🔴 DEDUPED PER KIND BY ITS OWN IDENTITY. The frontend keys panes by a stable
+ * string, and two identical entries would collide as React keys and misbehave
+ * in a way that looks like a rendering bug rather than a data one.
+ */
+const projectVideosOrUndefined = (
+  rows: PayloadProject['videos'],
+): ProjectVideo[] | undefined => {
+  if (!Array.isArray(rows) || rows.length === 0) return undefined
+
+  const out: ProjectVideo[] = []
+  const seen = new Set<string>()
+
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const title = typeof row.title === 'string' ? row.title.trim() : ''
+
+    // ---- AN UPLOADED MP4 ----
+    if (row.kind === 'video') {
+      /* A bare id string means `depth` was too shallow. Never guess a URL from
+         an id — that is how a silently broken video ships. */
+      const doc = row.video
+      if (!doc || typeof doc !== 'object') continue
+
+      const filename = typeof doc.filename === 'string' ? doc.filename.trim() : ''
+      const src =
+        (filename ? cloudinaryFileUrl('videos', filename) : undefined) ??
+        (typeof doc.url === 'string' ? doc.url : '')
+      if (!src) continue
+      if (seen.has(`video:${src}`)) continue
+      seen.add(`video:${src}`)
+
+      /* The poster is `required: true` on the `videos` collection, so a bare id
+         here means the read was too shallow rather than an editorial choice.
+         Unlike the hero, a missing poster does NOT drop the row: these panes
+         carry native controls and a first frame, so a posterless video is still
+         usable — just less pretty. The frontend types it optional for exactly
+         this case. */
+      let poster: string | undefined
+      if (doc.poster && typeof doc.poster === 'object') {
+        try {
+          poster = toImageRef(doc.poster, 'videos[].poster').src || undefined
+        } catch {
+          poster = undefined
+        }
+      }
+
+      out.push({
+        kind: 'video',
+        src,
+        ...(poster ? { poster } : {}),
+        // The row's own caption wins over the asset's internal library label.
+        ...(title ? { title } : typeof doc.title === 'string' && doc.title.trim()
+          ? { title: doc.title.trim() }
+          : {}),
+      })
+      continue
+    }
+
+    // ---- A YOUTUBE LINK ----
+    if (row.kind === 'youtube') {
+      const youtubeUrl = typeof row.youtubeUrl === 'string' ? row.youtubeUrl.trim() : ''
+      if (!youtubeUrl) continue
+
+      /* 🔴 THE POSTER IS MANDATORY AND THE ROW IS DROPPED WITHOUT IT. The field
+         validator refuses to SAVE such a row, so reaching here means the data
+         predates the validator or arrived another way. A YouTube pane with no
+         poster renders empty, because YouTube's own thumbnail host is
+         deliberately absent from svfrontend's image allow-list. */
+      if (!row.poster || typeof row.poster !== 'object') continue
+      let poster: string
+      try {
+        poster = toImageRef(row.poster, 'videos[].poster').src
+      } catch {
+        continue
+      }
+      if (!poster) continue
+      if (seen.has(`youtube:${youtubeUrl}`)) continue
+      seen.add(`youtube:${youtubeUrl}`)
+
+      const duration = typeof row.duration === 'string' ? row.duration.trim() : ''
+      out.push({
+        kind: 'youtube',
+        // 🔴 VERBATIM, never reduced to an id — `youtubeId()` on the frontend
+        // is the single arbiter and accepts every share-button form.
+        youtubeUrl,
+        poster,
+        ...(title ? { title } : {}),
+        ...(duration ? { duration } : {}),
+      })
+      continue
+    }
+
+    /* An unknown `kind` is dropped rather than guessed at. `select` enums are
+       DB-level, so this is only reachable if the enum gained a value the
+       serialiser has not been taught — which must not render as something else. */
+  }
+
+  return out.length > 0 ? out : undefined
+}
+
 /** Both-or-neither, enforced at the field level too. */
 const ctaOrUndefined = (
   cta: PayloadProject['cta'],
@@ -239,6 +392,44 @@ export const toPublicProject = (doc: PayloadProject): PublicProject => {
    */
   put(out, 'logo', toImageRefOrUndefined(doc.logo, 'logo'))
 
+  /**
+   * The promotion video.
+   *
+   * 🔶 LIKE `logo`, THIS IS NOT ON `types/frontend-contract.ts`, AND THAT IS
+   * CORRECT — DO NOT ADD IT. That file is a BYTE-IDENTICAL copy of the
+   * frontend's `src/types/content.ts`, which deliberately carries only what the
+   * backend has always emitted. The frontend declares this shape beside the
+   * code that resolves it (`ProjectPromoVideo` in `src/lib/projectVideo.ts`),
+   * exactly as it declares `logo?: ImageRef | null` on the card's own `Item`
+   * type. Adding either here would fail the drift gate in `check:drift` and
+   * force a two-repo change for a field the contract file does not model.
+   *
+   * ⚠️ EMITTED ON THE CARD TOO — see `toPublicProjectCard` below. This is the
+   * ONE place where this field differs from `logo`, which is detail-only
+   * because the homepage deck already fetches each project's detail record for
+   * `gallery`. The frontend's `projectVideo()` reads BOTH records on purpose,
+   * so emitting it on both removes a whole class of "we shipped it, why is
+   * nothing showing".
+   */
+  put(out, 'promoVideo', promoVideoOrUndefined(doc.promoVideo))
+
+  /**
+   * The project's full video list — DETAIL ONLY, like `logo`.
+   *
+   * 🔴 DELIBERATELY NOT ON THE CARD PAYLOAD. The card renders `promoVideo` and
+   * nothing else, so shipping every video row to `/projects` would send N rows
+   * per project to the catalogue, the homepage deck, the nav, the footer and
+   * the sitemap for no consumer — the same over-fetching argument that keeps
+   * `gallery` and `logo` off the card shape. `promoVideo` is on BOTH because
+   * the frontend's resolver genuinely reads both records; this is not.
+   *
+   * 🔶 NOT ON `types/frontend-contract.ts` EITHER — the frontend declares it in
+   * `src/types/projectMedia.ts`, which svbackend vendors and byte-diffs
+   * separately as `frontend-contract-project-media.ts`. Adding it to the shared
+   * contract would fail the existing drift gate.
+   */
+  put(out, 'videos', projectVideosOrUndefined(doc.videos))
+
   put(out, 'cta', ctaOrUndefined(doc.cta))
   put(out, 'seo', seoOrUndefined(doc.seo))
   put(out, 'brochure', brochureOrUndefined(doc.brochure))
@@ -273,6 +464,20 @@ export const toPublicProjectCard = (doc: PayloadProject): Partial<PublicProject>
   put(out, 'tagline', doc.tagline)
   put(out, 'developer', doc.developer)
 
+  /**
+   * 🔴 THE ONE FIELD THE CARD CARRIES THAT `logo` DOES NOT, and the reason is
+   * the frontend's, not ours: `projectVideo(slug, detail, listRecord)` asks the
+   * detail record first and the list record second, because "a backend adding
+   * the field need not add it to both payloads, and which one it lands in
+   * should not be something this frontend has to be redeployed to find out".
+   * Honouring both halves of that costs one line and one SELECT entry.
+   *
+   * It is the SAME helper as the detail serialiser, so the two payloads cannot
+   * disagree about the shape — which is the failure `brochure` had when its
+   * href was composed in two places.
+   */
+  put(out, 'promoVideo', promoVideoOrUndefined(doc.promoVideo))
+
   return out as Partial<PublicProject>
 }
 
@@ -297,6 +502,16 @@ export const PUBLIC_PROJECT_CARD_SELECT = {
   summary: true,
   featured: true,
   image: true,
+  /**
+   * 🔴 SELECTED ON THE CARD PAYLOAD, AND FORGETTING THIS IS THE KNOWN BUG.
+   * `select` is include-mode, so a field absent from this object is never
+   * QUERIED — the serialiser then reads `undefined`, omits the key, and the
+   * video "silently never appears" with nothing in any log. That is precisely
+   * what kept `projects.brochure` invisible in production until it was added to
+   * its own select. A group needs no `depth` to resolve: it is columns on the
+   * projects row, not a relation.
+   */
+  promoVideo: true,
 } as const
 
 export const PUBLIC_PROJECT_SELECT = {
@@ -323,4 +538,15 @@ export const PUBLIC_PROJECT_SELECT = {
   // `{ filename, url, title }`; omitting it here would hand the serialiser a
   // bare id and the download link would silently never appear.
   brochure: true,
+  /**
+   * The ordered video list. DETAIL ONLY — deliberately absent from
+   * `PUBLIC_PROJECT_CARD_SELECT`, so the catalogue never pays for it.
+   *
+   * 🔴 `true` RATHER THAN A NESTED OBJECT. Selecting the whole array lets the
+   * route's `depth` populate `video` and `poster` through each collection's own
+   * `defaultPopulate` — which is where `videos` resolves
+   * `{filename, url, title, poster}`. A hand-written nested select would have
+   * to restate those and would drift from them.
+   */
+  videos: true,
 } as const

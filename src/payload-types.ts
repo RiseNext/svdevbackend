@@ -72,6 +72,7 @@ export interface Config {
     documents: Document;
     videos: Video;
     projects: Project;
+    'blog-posts': BlogPost;
     leads: Lead;
     testimonials: Testimonial;
     faqs: Faq;
@@ -97,6 +98,7 @@ export interface Config {
     documents: DocumentsSelect<false> | DocumentsSelect<true>;
     videos: VideosSelect<false> | VideosSelect<true>;
     projects: ProjectsSelect<false> | ProjectsSelect<true>;
+    'blog-posts': BlogPostsSelect<false> | BlogPostsSelect<true>;
     leads: LeadsSelect<false> | LeadsSelect<true>;
     testimonials: TestimonialsSelect<false> | TestimonialsSelect<true>;
     faqs: FaqsSelect<false> | FaqsSelect<true>;
@@ -633,6 +635,51 @@ export interface Project {
    */
   brochure?: (string | null) | Document;
   /**
+   * An optional YouTube video for this project, shown beside the photographs on the homepage card. Paste the link exactly as YouTube’s Share button gives it — a watch link, a youtu.be link or a Shorts link all work. Leave empty for no video.
+   */
+  promoVideo?: {
+    /**
+     * Paste the YouTube link. Do NOT shorten it to just the video id by hand — that is the step that gets a character wrong, and a wrong id is a card that looks right and plays nothing.
+     */
+    youtubeUrl?: string | null;
+    /**
+     * Optional. The running time as it should be printed on the badge, e.g. “2:14”. Leave empty for no badge — do not guess at one. YouTube does not reveal duration without an API key, so this is typed by hand.
+     */
+    duration?: string | null;
+  };
+  /**
+   * Videos for this project’s own page, in order — drag to reorder. Mix uploaded MP4s and YouTube links freely. Leave empty for no video section. This is separate from “Promotion video” above, which is the single video shown on the homepage card.
+   */
+  videos?:
+    | {
+        /**
+         * What this entry is. Choose first — the field you need appears below.
+         */
+        kind: 'youtube' | 'video';
+        /**
+         * Choose a video from Media → Videos, or upload a new one. MP4, up to 6 MB, and it must already have a poster set there.
+         */
+        video?: (string | null) | Video;
+        /**
+         * Paste the link exactly as YouTube’s Share button gives it — a watch link, a youtu.be link or a Shorts link all work.
+         */
+        youtubeUrl?: string | null;
+        /**
+         * REQUIRED for a YouTube entry — this is what fills the pane until someone presses play. Use a still from the video itself.
+         */
+        poster?: (string | null) | Media;
+        /**
+         * Optional, and typed by hand — e.g. “2:14”. No value simply means no badge.
+         */
+        duration?: string | null;
+        /**
+         * Optional caption, e.g. “Drone walkthrough, March 2026”. Also used as the video’s accessible name, so a screen-reader user hears it instead of “Video 2”.
+         */
+        title?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  /**
    * Overrides the shared call-to-action banner for this project only.
    */
   cta?: {
@@ -728,6 +775,68 @@ export interface Video {
   filesize?: number | null;
   width?: number | null;
   height?: number | null;
+}
+/**
+ * Articles and video posts for the Blog page. Newest first is the public order, taken from “Published date” — the first post is shown as the large feature card. A post needs at least one of: paragraphs, a YouTube link, or an external article link.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "blog-posts".
+ */
+export interface BlogPost {
+  id: string;
+  /**
+   * The public web address for this post: /blog/<slug>. Generated from the title. LOCKED once the post has been published — changing it would break every link and search-engine listing that already points here.
+   */
+  slug: string;
+  /**
+   * The headline. A sentence rather than a label — it is set in the display serif on the post’s own page.
+   */
+  title: string;
+  /**
+   * Two or three lines. This is the card copy AND the search-engine description, so write it rather than letting it be a truncated first paragraph.
+   */
+  excerpt: string;
+  /**
+   * The date printed on the card and used to order the Blog page, newest first. Set it yourself — this is NOT the moment you press Publish, so an older article can be added in its right place.
+   */
+  publishedAt: string;
+  /**
+   * Optional one-word-ish label for the chip on the card, e.g. “Buying guide” or “Site update”. Free text — there is no fixed list.
+   */
+  topic?: string | null;
+  /**
+   * Optional byline. Leave empty rather than entering the company name — “SV Developers” under a company blog post reads as noise.
+   */
+  author?: string | null;
+  /**
+   * Optional. The picture on the card and at the top of the post. STRONGLY RECOMMENDED on video posts too: without one the card falls back to YouTube’s own thumbnail, which is served from a host the website cannot resize through.
+   */
+  cover?: (string | null) | Media;
+  /**
+   * Fill this in to make this a video post. Leave it empty for an article.
+   */
+  video?: {
+    /**
+     * Paste the link exactly as YouTube’s Share button gives it — a watch link, a youtu.be link or a Shorts link all work.
+     */
+    youtubeUrl?: string | null;
+    /**
+     * Optional, and typed by hand — e.g. “12:40”. YouTube does not reveal duration without an API key, so leave it empty rather than guessing; no value simply means no badge.
+     */
+    duration?: string | null;
+  };
+  /**
+   * Optional. Set this ONLY when the post lives somewhere else (a news site, LinkedIn, a PDF) — the card will then link straight out and no page is built on this site. Leave empty for a post written here.
+   */
+  externalUrl?: string | null;
+  /**
+   * One entry per paragraph. Order is meaningful, and each paragraph must be unique — the website uses the text itself as a rendering key. Leave empty for a video-only or external post.
+   */
+  body?: string[] | null;
+  updatedAt: string;
+  createdAt: string;
+  deletedAt?: string | null;
+  _status?: ('draft' | 'published') | null;
 }
 /**
  * Enquiries from the website contact form. A lead is a COMMERCIAL RECORD — archive it, never delete it.
@@ -1032,6 +1141,10 @@ export interface PayloadLockedDocument {
         value: string | Project;
       } | null)
     | ({
+        relationTo: 'blog-posts';
+        value: string | BlogPost;
+      } | null)
+    | ({
         relationTo: 'leads';
         value: string | Lead;
       } | null)
@@ -1277,6 +1390,23 @@ export interface ProjectsSelect<T extends boolean = true> {
   layoutImage?: T;
   locationMap?: T;
   brochure?: T;
+  promoVideo?:
+    | T
+    | {
+        youtubeUrl?: T;
+        duration?: T;
+      };
+  videos?:
+    | T
+    | {
+        kind?: T;
+        video?: T;
+        youtubeUrl?: T;
+        poster?: T;
+        duration?: T;
+        title?: T;
+        id?: T;
+      };
   cta?:
     | T
     | {
@@ -1292,6 +1422,31 @@ export interface ProjectsSelect<T extends boolean = true> {
   slug?: T;
   featured?: T;
   publishedAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  deletedAt?: T;
+  _status?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "blog-posts_select".
+ */
+export interface BlogPostsSelect<T extends boolean = true> {
+  slug?: T;
+  title?: T;
+  excerpt?: T;
+  publishedAt?: T;
+  topic?: T;
+  author?: T;
+  cover?: T;
+  video?:
+    | T
+    | {
+        youtubeUrl?: T;
+        duration?: T;
+      };
+  externalUrl?: T;
+  body?: T;
   updatedAt?: T;
   createdAt?: T;
   deletedAt?: T;
@@ -1626,9 +1781,41 @@ export interface SiteSetting {
    */
   masterPlan?: (string | null) | Document;
   /**
-   * The videos the site is currently running, in order — drag to reorder. The website decides how they are presented: one video shows on its own, several become a carousel in exactly this order. Leave empty for no video.
+   * LEGACY — prefer “Hero media” below, which also takes images and YouTube links. Still fully supported and still rendered when “Hero media” is empty, so nothing here needs changing. The videos the site is currently running, in order — drag to reorder.
    */
   heroVideos?: (string | Video)[] | null;
+  /**
+   * The homepage hero, in order — drag to reorder. Mix photographs, uploaded videos and YouTube links freely. One entry shows on its own; several become a slideshow in exactly this order. Leave empty to keep using “Hero videos” above.
+   */
+  heroMedia?:
+    | {
+        /**
+         * What this entry is. Choose first — the field you need appears below.
+         */
+        kind: 'image' | 'video' | 'youtube';
+        /**
+         * A landscape photograph. Its alternative text comes from the Media library entry, so write it there.
+         */
+        image?: (string | null) | Media;
+        /**
+         * Choose a video from Media → Videos, or upload a new one. MP4, up to 6 MB, and it must already have a poster set there.
+         */
+        video?: (string | null) | Video;
+        /**
+         * Paste the link exactly as YouTube’s Share button gives it. ⚠️ A YouTube entry does NOT autoplay — it shows its poster with a play button, and starts when a visitor clicks. Upload an MP4 instead if you need silent background motion.
+         */
+        youtubeUrl?: string | null;
+        /**
+         * REQUIRED for a YouTube entry — this is what fills the hero until someone presses play. Use a still from the video itself.
+         */
+        poster?: (string | null) | Media;
+        /**
+         * Optional label, e.g. “Aerial approach”. Not shown as body copy — it names this slide for the slideshow’s controls, so a screen-reader user hears it instead of “Slide 2”.
+         */
+        title?: string | null;
+        id?: string | null;
+      }[]
+    | null;
   updatedAt?: string | null;
   createdAt?: string | null;
 }
@@ -1698,6 +1885,17 @@ export interface SiteSettingsSelect<T extends boolean = true> {
       };
   masterPlan?: T;
   heroVideos?: T;
+  heroMedia?:
+    | T
+    | {
+        kind?: T;
+        image?: T;
+        video?: T;
+        youtubeUrl?: T;
+        poster?: T;
+        title?: T;
+        id?: T;
+      };
   updatedAt?: T;
   createdAt?: T;
   globalType?: T;

@@ -304,8 +304,203 @@ export const SiteSettings: GlobalConfig = {
               hasMany: true,
               admin: {
                 description:
-                  'The videos the site is currently running, in order — drag to reorder. The website decides how they are presented: one video shows on its own, several become a carousel in exactly this order. Leave empty for no video.',
+                  'LEGACY — prefer “Hero media” below, which also takes images and YouTube links. Still fully supported and still rendered when “Hero media” is empty, so nothing here needs changing. The videos the site is currently running, in order — drag to reorder.',
               },
+            },
+            {
+              /**
+               * 🔴 THE UNIFIED HERO MEDIA LIST — images, uploaded MP4s and
+               * YouTube links in ONE ordered sequence.
+               *
+               * ─── WHY AN `array` AND NOT A POLYMORPHIC UPLOAD RELATION ─────
+               * `relationTo: ['media', 'videos']` with `hasMany` was the
+               * obvious shape and it CANNOT WORK, for a reason that is about
+               * the data and not about taste: a YouTube entry is a pasted URL
+               * and has no upload row to point at. A relation can only
+               * reference documents, so a polymorphic relation could express
+               * two of the three kinds and would need a second field beside it
+               * for the third — which is two sources of order for one list.
+               *
+               * An `array` holds all three in one ordered sequence. It is also
+               * the pattern this global ALREADY uses three times (`social`,
+               * `legalLinks`, `heroTicker`), whereas no polymorphic relation
+               * exists anywhere in this codebase — so this is the proven path,
+               * not the novel one.
+               *
+               * ─── WHY `kind` IS EXPLICIT AND NOT DERIVED ───────────────────
+               * 🔴 Deriving the type from "which source field is populated"
+               * fails the moment an admin fills in two, and then precedence is
+               * invisible to them. The frontend already settled this exact
+               * question for `BlogPost.externalUrl` and wrote down the rule:
+               * "inference means an admin who fills in both cannot tell which
+               * one wins". One field, one meaning.
+               *
+               * ⚠️ `admin.condition` BELOW IS A UI AFFORDANCE, NOT VALIDATION.
+               * It hides the irrelevant fields; it does NOT stop the REST API
+               * storing a `youtubeUrl` on a `kind: 'image'` row. `validate` on
+               * this array is the enforcement — see it below.
+               *
+               * ─── ORDERING ─────────────────────────────────────────────────
+               * Array order IS carousel order, across all three kinds. Payload
+               * persists an array in a child table with an explicit `_order`
+               * column, so drag-to-reorder in the admin is the only thing that
+               * decides it. The serialiser must never sort.
+               *
+               * ─── BACKWARD COMPATIBILITY ───────────────────────────────────
+               * 🔴 `heroVideos` ABOVE IS UNTOUCHED AND STILL SERIALISED
+               * IDENTICALLY. One hero video is live in production right now;
+               * this field is ADDITIVE, and the frontend prefers `heroMedia`
+               * only when it is non-empty, falling back to `heroVideos`
+               * otherwise. So an admin who never opens this field sees no
+               * change, and there is NO content migration.
+               */
+              name: 'heroMedia',
+              label: 'Hero media',
+              type: 'array',
+              maxRows: MAX_ARRAY_ROWS,
+              admin: {
+                description:
+                  'The homepage hero, in order — drag to reorder. Mix photographs, uploaded videos and YouTube links freely. One entry shows on its own; several become a slideshow in exactly this order. Leave empty to keep using “Hero videos” above.',
+                initCollapsed: true,
+                components: {
+                  RowLabel: '@/components/admin/HeroMediaRowLabel#HeroMediaRowLabel',
+                },
+              },
+              /**
+               * EACH ROW MUST CARRY THE SOURCE ITS `kind` PROMISES.
+               *
+               * 🔴 THIS IS THE REAL GUARD, because `admin.condition` is not one.
+               * A row whose kind and source disagree is unrenderable: the
+               * serialiser would drop it and the admin would see an entry in the
+               * list that never appears on the site, with nothing to explain why.
+               *
+               * ⚠️ A YOUTUBE ROW REQUIRES A POSTER, and that is not fussiness.
+               * YouTube's own thumbnails come from `i.ytimg.com`, which is
+               * deliberately NOT in svfrontend's `next.config.mjs`
+               * `images.remotePatterns` and is not being added. Without a
+               * poster from `media` there is nothing the hero can show before
+               * the visitor clicks.
+               */
+              validate: (value: unknown): true | string => {
+                if (value === undefined || value === null) return true
+                if (!Array.isArray(value)) return 'Hero media must be a list.'
+
+                for (const [i] of value.entries()) {
+                  const row = value[i] as Record<string, unknown> | null
+                  if (!row) continue
+                  const at = `Row ${i + 1}`
+                  const kind = row.kind
+
+                  if (kind === 'image' && !row.image) {
+                    return `${at}: choose a photograph, or change its type.`
+                  }
+                  if (kind === 'video' && !row.video) {
+                    return `${at}: choose an uploaded video, or change its type.`
+                  }
+                  if (kind === 'youtube') {
+                    const url = typeof row.youtubeUrl === 'string' ? row.youtubeUrl.trim() : ''
+                    if (!url) return `${at}: paste a YouTube link, or change its type.`
+                    if (!row.poster) {
+                      return `${at}: a YouTube entry needs a poster image — YouTube's own thumbnail cannot be used here.`
+                    }
+                  }
+                }
+                return true
+              },
+              fields: [
+                {
+                  name: 'kind',
+                  label: 'Type',
+                  type: 'select',
+                  required: true,
+                  defaultValue: 'image',
+                  options: [
+                    { label: 'Photograph', value: 'image' },
+                    { label: 'Uploaded video (MP4)', value: 'video' },
+                    { label: 'YouTube link', value: 'youtube' },
+                  ],
+                  admin: {
+                    description:
+                      'What this entry is. Choose first — the field you need appears below.',
+                  },
+                },
+                {
+                  /**
+                   * ⚠️ THE EXISTING `media` COLLECTION, which is the whole
+                   * reason an image entry costs nothing: `toImageRef` already
+                   * composes `/image/upload/media/**` — a path svfrontend
+                   * ALREADY allowlists — and `media` runs the established
+                   * pipeline (sniffing, four-layer SVG rejection, EXIF strip,
+                   * intrinsic dimensions). Its `alt` text comes with it, which
+                   * is what makes a hero photograph accessible without a second
+                   * field here.
+                   */
+                  name: 'image',
+                  label: 'Photograph',
+                  type: 'upload',
+                  relationTo: 'media',
+                  admin: {
+                    condition: (_data, siblingData) => siblingData?.kind === 'image',
+                    description:
+                      'A landscape photograph. Its alternative text comes from the Media library entry, so write it there.',
+                  },
+                },
+                {
+                  /**
+                   * ⚠️ THE EXISTING `videos` COLLECTION — the SAME one
+                   * `heroVideos` uses, so an uploaded hero video inherits the
+                   * MP4-only allow-list, the 6 MB ceiling, `pasteURL: false`
+                   * and the required poster/title WITHOUT any new upload code.
+                   * That is also what makes a video already in the library
+                   * reusable here rather than needing a second upload.
+                   */
+                  name: 'video',
+                  label: 'Uploaded video',
+                  type: 'upload',
+                  relationTo: 'videos',
+                  admin: {
+                    condition: (_data, siblingData) => siblingData?.kind === 'video',
+                    description:
+                      'Choose a video from Media → Videos, or upload a new one. MP4, up to 6 MB, and it must already have a poster set there.',
+                  },
+                },
+                {
+                  name: 'youtubeUrl',
+                  label: 'YouTube link',
+                  type: 'text',
+                  maxLength: LIMITS.url,
+                  hooks: {
+                    beforeValidate: [
+                      ({ value }) => (typeof value === 'string' ? value.trim() : value),
+                    ],
+                  },
+                  admin: {
+                    condition: (_data, siblingData) => siblingData?.kind === 'youtube',
+                    description:
+                      'Paste the link exactly as YouTube’s Share button gives it. ⚠️ A YouTube entry does NOT autoplay — it shows its poster with a play button, and starts when a visitor clicks. Upload an MP4 instead if you need silent background motion.',
+                  },
+                },
+                {
+                  name: 'poster',
+                  label: 'Poster image',
+                  type: 'upload',
+                  relationTo: 'media',
+                  admin: {
+                    condition: (_data, siblingData) => siblingData?.kind === 'youtube',
+                    description:
+                      'REQUIRED for a YouTube entry — this is what fills the hero until someone presses play. Use a still from the video itself.',
+                  },
+                },
+                {
+                  name: 'title',
+                  type: 'text',
+                  maxLength: 200,
+                  admin: {
+                    description:
+                      'Optional label, e.g. “Aerial approach”. Not shown as body copy — it names this slide for the slideshow’s controls, so a screen-reader user hears it instead of “Slide 2”.',
+                  },
+                },
+              ],
             },
           ],
         },
