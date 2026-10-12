@@ -169,7 +169,40 @@ export const cloudinaryAdapter: Adapter = (): GeneratedAdapter => ({
     // migration, to store what is already derivable from `prefix` + `filename`.
   },
 
-  handleDelete: async ({ storageFilePath }) => {
+  handleDelete: async ({ req, storageFilePath }) => {
+    /**
+     * 🔴 THE REPLACE PATH MUST NOT DESTROY ANYTHING. THIS IS THE DATA-LOSS FIX.
+     *
+     * `@payloadcms/plugin-cloud-storage`'s `afterChange` hook treats any key not
+     * present in the NEW document as stale and calls `handleDelete` on it
+     * (dist/hooks/afterChange.js:82-135). Because `uploadGuard` renames every
+     * upload — including an update that carries bytes — to a fresh `randomUUID()`
+     * (src/hooks/uploadGuard.ts:254,325), the previous key is ALWAYS considered
+     * stale on a replace. So replacing a file used to destroy the old object,
+     * and its generated `thumbnail`, in the same request, with
+     * `invalidate: true` purging the CDN as well.
+     *
+     * That made an accidental wrong-file replacement unrecoverable the instant
+     * Save was pressed — and it falsified the repo's own promise, written on
+     * three collections, that "an accidental replace is recoverable for 30 days".
+     *
+     * `captureReplacedFile` (src/hooks/mediaGuards.ts) runs BEFORE the plugin's
+     * hook — plugin hooks are APPENDED to the collection's own
+     * (plugin.js:120-128) — records the superseded key, and sets this flag. So
+     * on a replace the old object simply survives, and `sweepDeletedMedia`
+     * removes it after the grace period instead. The 30-day promise becomes
+     * true rather than aspirational.
+     *
+     * ⚠️ SCOPED TO THE REPLACE PATH ONLY, and deliberately so. A real delete —
+     * the admin's "Permanently Delete", or the sweeper — reaches `handleDelete`
+     * through `afterDelete`, on a request where `captureReplacedFile` never ran,
+     * so the flag is absent and the destroy proceeds exactly as before.
+     */
+    if ((req as { context?: { skipStorageDelete?: unknown } } | undefined)?.context
+      ?.skipStorageDelete) {
+      return
+    }
+
     await cloudinary.uploader.destroy(publicIdFor(storageFilePath), {
       resource_type: resourceTypeFor(storageFilePath),
       type: 'upload',

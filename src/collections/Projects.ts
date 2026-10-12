@@ -82,10 +82,37 @@ export const Projects: CollectionConfig = {
     defaultColumns: ['name', 'category', 'locality', 'featured', '_status', 'updatedAt'],
     listSearchableFields: ['name', 'locality', 'slug'],
     group: 'Content',
+    // 🔴 CORRECTED. This used to warn that a newly published project was "NOT
+    // yet in the header dropdown or the footer column" and that a sixth project
+    // "requires a copy change on the homepage, which currently reads 'Five
+    // layouts.'" Both are now false: the nav dropdown and footer column are
+    // derived from the published set (`svfrontend/src/content/site.ts`), and the
+    // /projects heading spells the live count (`app/projects/page.tsx`).
     description:
-      'The project catalogue. NOTE: until the website’s navigation is wired to this list, a newly published project appears at /projects, in the sitemap and at its own address, but NOT yet in the header dropdown or the footer column. Publishing a sixth project also requires a copy change on the homepage, which currently reads “Five layouts.”',
-    // ⚠️ The option is `baseFilter`, NOT `baseListFilter`.
-    baseFilter: () => ({ deletedAt: { exists: false } }),
+      'The project catalogue. Drag rows to set the order they appear on the website. A newly published project appears at /projects, at its own address, in the header dropdown, the footer column and the sitemap — all derived from this list, with no code change needed.',
+    // 🔴 `baseFilter` IS DELIBERATELY ABSENT, AND MUST STAY ABSENT.
+    //
+    // It was `() => ({ deletedAt: { exists: false } })`, which read as "hide
+    // archived rows from the list". It did not need to: Payload ALREADY does
+    // that itself via `appendNonTrashedFilter`, which ANDs the identical
+    // constraint into every `find` / `count` / `findByID` / `update` / `delete`
+    // on a `trash: true` collection (payload/dist/utilities/
+    // appendNonTrashedFilter.js, called from collections/operations/find.js).
+    //
+    // What it ALSO did was leak into the TRASH view. `@payloadcms/next`'s list
+    // view invokes `baseFilter` unconditionally and THEN ANDs
+    // `deletedAt exists: true` on top (dist/views/List/index.js:115-134), and
+    // `exists: false` compiles to `IS NULL` while `exists: true` compiles to
+    // `IS NOT NULL` (@payloadcms/drizzle sanitizeQueryValue.js:216-223). The
+    // Trash tab therefore queried
+    //   deleted_at IS NULL AND deleted_at IS NOT NULL
+    // — unsatisfiable for every row. The bin was permanently empty and
+    // "Restore" was unreachable, while `blockProjectHardDelete` refuses a
+    // permanent delete, so archiving a project was a ONE-WAY DOOR.
+    //
+    // `baseFilter` receives `{ limit, page, req, sort }` only — no `trash`
+    // flag — so it cannot be made trash-aware. Removal is the fix.
+    // `tests/integration/trashRestore.test.ts` asserts it stays absent.
     preview: (doc) =>
       typeof doc?.slug === 'string'
         ? `${process.env.REVALIDATE_WEBHOOK_URL?.replace(/\/api\/revalidate$/, '') ?? ''}/projects/${doc.slug}`
@@ -215,7 +242,12 @@ export const Projects: CollectionConfig = {
               maxLength: LIMITS.summary,
               admin: {
                 description:
-                  'Rendered as the LARGE HEADING on the detail page — not as a paragraph. Keep it to a sentence or two.',
+                  // 🔴 CORRECTED. This used to say "Rendered as the LARGE
+                  // HEADING on the detail page — not as a paragraph". The
+                  // heading is the fixed string "About <name>"
+                  // (`ProjectDetail.tsx` SectionHead); this renders as the lead
+                  // paragraph directly beneath it.
+                  'The opening paragraph of the Overview section on the project page, set in larger type. Keep it to a sentence or two — the heading above it is generated from the project name.',
               },
             },
             {
@@ -349,8 +381,22 @@ export const Projects: CollectionConfig = {
               label: 'Highlights',
               required: true,
               minRows: 1,
+              // 🔴 CORRECTED, AND THE OLD TEXT WAS WRONG TWICE.
+              //
+              // It said "At least one is required — this section is not guarded
+              // in the page template." Neither half held:
+              //   · NOT ENFORCED. `featureArray()` sets `required: true` and
+              //     `minRows: 1`, but ALSO a custom `validate` (uniqueByKey),
+              //     and a custom validate REPLACES Payload's built-in array
+              //     validation wholesale (fields/config/sanitize.js:153-167).
+              //     `uniqueByKey` returns true for a non-array, so a project
+              //     publishes with zero highlights, silently, asterisk and all.
+              //   · IT IS GUARDED. `ProjectDetail.tsx` checks
+              //     `project.highlights.length` before rendering the band, and
+              //     `toPublicProject.ts` always emits an array.
+              // So an empty list is accepted and simply removes the section.
               description:
-                'The headline selling points. At least one is required — this section is not guarded in the page template.',
+                'The headline selling points, shown as the “What this layout is made of” band. Strongly recommended, but not enforced — leave it empty and that band simply does not appear on the project page.',
             }),
 
             featureArray({
@@ -497,7 +543,13 @@ export const Projects: CollectionConfig = {
               relationTo: 'documents',
               admin: {
                 description:
-                  'The project brochure as a PDF, chosen from Documents. Upload it under Media → Documents first, or use “Create New” here. ⚠️ NOT YET RENDERED ON THE WEBSITE: this field is editable now so brochures can be collected, but the public project page has no download link for it yet, so setting it changes nothing visible to a visitor.',
+                  // 🔴 CORRECTED. This used to warn "NOT YET RENDERED ON THE
+                  // WEBSITE … setting it changes nothing visible to a visitor".
+                  // It IS rendered: `brochure: true` is in
+                  // `PUBLIC_PROJECT_SELECT` (toPublicProject.ts) and
+                  // `ProjectDetail.tsx` renders up to three download controls
+                  // from it. The warning outlived the feature gap it described.
+                  'The project brochure as a PDF, chosen from Documents. Upload it under Media → Documents first, or use “Create New” here. Shown on the project page as a “Download brochure” button. Removing it from here is the only way to take the download off the site — the PDF cannot be deleted from Documents while a project still links to it.',
               },
             },
             {

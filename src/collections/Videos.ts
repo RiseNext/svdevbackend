@@ -194,9 +194,11 @@ export const Videos: CollectionConfig = {
       access: { ...serverOnlyField, read: isAdminField },
     },
     {
-      // Captured on replace so the existing sweeper can remove the superseded
-      // Cloudinary object after the grace period. Identical mechanism to
-      // `media` and `documents`; `captureReplacedFile` is collection-agnostic.
+      // The storage keys this record used to point at, one per replacement.
+      // Identical mechanism to `media` and `documents` — `captureReplacedFile`
+      // is collection-agnostic — and see the long note on `media` for why the
+      // object now genuinely survives a replace and why collecting it is still
+      // a manual job rather than the sweeper's.
       name: 'supersededFilenames',
       type: 'text',
       hasMany: true,

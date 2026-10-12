@@ -27,6 +27,21 @@ import { env } from '@/lib/env'
 const daysAgo = (days: number): string =>
   new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
 
+/**
+ * Is this error one of the in-use guards refusing, rather than a real failure?
+ *
+ * `mediaDeleteGuard` / `videoDeleteGuard` / `documentDeleteGuard` all throw
+ * `APIError(…, 409)`. An asset that was restored and re-attached during the
+ * 30-day grace window SHOULD be refused, so that outcome is a skip-and-warn,
+ * not an error — and keeping the distinction means a genuine fault (a dead
+ * Cloudinary, a constraint violation) still surfaces as `error`.
+ *
+ * Matched on `status` rather than on the message, so rewording a guard cannot
+ * silently reclassify a refusal as a failure.
+ */
+const isInUseRefusal = (err: unknown): boolean =>
+  typeof err === 'object' && err !== null && (err as { status?: unknown }).status === 409
+
 // ---------------------------------------------------------------------------
 
 export const revalidatePaths: TaskConfig<'revalidatePaths'> = {
@@ -169,13 +184,82 @@ export const sweepDeletedMedia: TaskConfig<'sweepDeletedMedia'> = {
   /**
    * Hard-deletes media soft-deleted more than the grace period ago.
    *
-   * 🔴 IT RE-CHECKS ATTACHMENT IMMEDIATELY BEFORE REMOVING ANYTHING. The
-   * soft-delete window separates the delete guard from the hard delete by ~30
-   * days, and a document can be restored and re-attached in between.
+   * ─── 🔴 THIS TASK HAD NEVER DELETED ANYTHING. MEASURED. ────────────────────
+   *
+   * It passed `trash: false` to `payload.delete` against rows it had just
+   * selected with `trash: true` — i.e. rows whose `deletedAt` IS set.
+   * `deleteByID` runs `appendNonTrashedFilter({ enableTrash, trash, where })`
+   * (payload/dist/collections/operations/deleteByID.js:50-54), which with
+   * `enableTrash: true` and a falsy `trash` ANDs `deletedAt exists: false` into
+   * the lookup. `db.findOne` therefore matched NOTHING, and because
+   * `overrideAccess: true` makes `hasWhereAccessResult(true)` false, line 62
+   * threw `NotFound` — straight into this task's own catch, which logged
+   * "failed to sweep media", left `swept` at 0, and returned SUCCESS. So the
+   * watchdog never flagged it either. Soft-deleted objects accumulated in
+   * Cloudinary indefinitely, silently, for every row this job ever examined.
+   *
+   * `trash: true` is the fix. One word, and it converts a dormant no-op into a
+   * live destroyer — which is why the rest of this rewrite exists.
+   *
+   * ─── WHY THE IN-USE RE-CHECK IS NOW DELEGATED ──────────────────────────────
+   *
+   * The previous re-check inspected FOUR fields on `projects` and only for
+   * `media`: `image`, `gallery`, `layoutImage`, `locationMap`. It silently
+   * omitted `projects.logo`, `projects.videos[].poster`, `blog-posts.cover`,
+   * `site-settings.logo` and `site-settings.heroMedia[]` — all of which
+   * `mediaDeleteGuard` DOES check — and did no check at all for `videos` or
+   * `documents`. Two definitions of "in use", one of them wrong, is how an
+   * asset that something still points at gets destroyed.
+   *
+   * So there is now exactly ONE definition, and it is the guards'.
+   * `payload.delete` runs `beforeDelete` hooks UNCONDITIONALLY, regardless of
+   * `overrideAccess` (deleteByID.js:69-79), so `mediaDeleteGuard` /
+   * `videoDeleteGuard` / `documentDeleteGuard` all fire here exactly as they do
+   * for an administrator. A 409 from one of them means "still referenced" and
+   * is treated as a SKIP, not an error — the sweeper cannot drift from the
+   * guards because it no longer has an opinion of its own.
+   *
+   * ─── DISARMED BY DEFAULT ───────────────────────────────────────────────────
+   *
+   * `MEDIA_SWEEP_ENABLED` defaults to false. In that state this does the full
+   * scan, runs the real guards, and logs precisely what it WOULD destroy
+   * without destroying it. See the note on the env var.
+   *
+   * ─── 🔶 SCOPE LIMIT: SUPERSEDED (REPLACED) OBJECTS ARE NOT SWEPT YET ───────
+   *
+   * This task sweeps soft-deleted ROWS. It does NOT sweep the objects left
+   * behind by a FILE REPLACEMENT, which `handleDelete` now deliberately
+   * preserves (src/media/cloudinary.ts) and `captureReplacedFile` records in
+   * `supersededFilenames`.
+   *
+   * RECORDED RATHER THAN QUIETLY SKIPPED, because the trade is deliberate:
+   *   · BEFORE, a replaced object was DESTROYED in the same request — an
+   *     accidental wrong-file replace was unrecoverable. That is data loss.
+   *   · NOW it survives and is never collected. That is bounded storage growth
+   *     — a few MB a year at this site's replacement rate.
+   * A leak you can clean up later beats bytes you cannot get back, so shipping
+   * the preservation half first is correct even though the collection half is
+   * not here yet.
+   *
+   * WHY IT IS NOT DONE HERE: expiring a superseded key needs to know WHEN it
+   * was superseded, and `supersededFilenames` is a bare `string[]` with no
+   * timestamps. Doing it properly means changing that field to
+   * `{ filename, replacedAt }[]` — a child table, a migration and a backfill.
+   * The alternatives are worse: using the row's `updatedAt` as a proxy is only
+   * a conservative lower bound (any later edit defers cleanup indefinitely),
+   * and reconstructing storage keys inside this job would duplicate the
+   * plugin's own path logic — which is precisely the two-definitions-of-one-
+   * thing drift that produced the in-use bug this rewrite just removed.
+   *
+   * Until then, superseded objects are cleaned up by hand; every one of them is
+   * listed in its own row's `supersededFilenames`.
    */
   handler: async ({ req }) => {
     const cutoff = daysAgo(MEDIA_GRACE_PERIOD_DAYS)
+    const armed = env.MEDIA_SWEEP_ENABLED
     let swept = 0
+    let wouldSweep = 0
+    let skippedInUse = 0
 
     // `videos` joins the existing list — the sweeper is collection-agnostic and
     // the adapter's `handleDelete` derives the Cloudinary resource type from the
@@ -192,33 +276,24 @@ export const sweepDeletedMedia: TaskConfig<'sweepDeletedMedia'> = {
       })
 
       for (const doc of expired.docs) {
-        // RE-CHECK. Cheap, and the alternative is deleting a live cover image.
-        if (collection === 'media') {
-          const stillUsed = await req.payload.find({
-            collection: 'projects',
-            overrideAccess: true,
-            depth: 0,
-            limit: 1,
-            trash: true,
-            where: {
-              or: [
-                { image: { equals: doc.id } },
-                { gallery: { equals: doc.id } },
-                { layoutImage: { equals: doc.id } },
-                { locationMap: { equals: doc.id } },
-              ],
+        /**
+         * DRY RUN. The in-use guards only run as part of a real delete, so a
+         * disarmed pass cannot prove a given row is safe — it reports the
+         * CANDIDATE set, which is the thing an operator needs to eyeball before
+         * arming. Stated plainly in the log so nobody reads it as "verified".
+         */
+        if (!armed) {
+          wouldSweep += 1
+          req.payload.logger.info(
+            {
+              collection,
+              id: doc.id,
+              filename: (doc as { filename?: unknown }).filename ?? null,
+              armed: false,
             },
-            // `id` is ALWAYS included in a result regardless of `select` — naming it
-      // here is a type error, not a no-op.
-      select: {},
-          })
-          if (stillUsed.totalDocs > 0) {
-            req.payload.logger.warn(
-              { id: doc.id },
-              'soft-deleted media is still referenced — skipping hard delete',
-            )
-            continue
-          }
+            'media sweep DRY RUN — would hard-delete this expired row (in-use guards not yet run; set MEDIA_SWEEP_ENABLED=true to arm)',
+          )
+          continue
         }
 
         try {
@@ -226,18 +301,39 @@ export const sweepDeletedMedia: TaskConfig<'sweepDeletedMedia'> = {
             collection,
             id: doc.id,
             overrideAccess: true,
-            // The real delete. Payload removes the storage object alongside it.
-            trash: false,
+            // 🔴 `trash: true` — WITHOUT IT THE LOOKUP CANNOT FIND THE ROW IT
+            // WAS JUST HANDED, and every iteration throws NotFound. See the
+            // long note above.
+            trash: true,
             context: { skipAudit: true },
           })
           swept += 1
         } catch (err) {
-          req.payload.logger.error({ err, id: doc.id }, 'failed to sweep media')
+          // A 409 is one of the in-use guards refusing: the asset was restored
+          // and re-attached during the grace window, which is a legitimate
+          // outcome and not a failure.
+          if (isInUseRefusal(err)) {
+            skippedInUse += 1
+            req.payload.logger.warn(
+              { collection, id: doc.id, reason: (err as Error).message },
+              'expired media is still referenced — skipping hard delete',
+            )
+            continue
+          }
+          req.payload.logger.error({ err, collection, id: doc.id }, 'failed to sweep media')
         }
       }
     }
 
-    if (swept) req.payload.logger.info({ swept }, 'swept expired media')
+    if (!armed && wouldSweep) {
+      req.payload.logger.warn(
+        { wouldSweep },
+        'media sweep is DISARMED — nothing was deleted. Review the dry-run lines above, then set MEDIA_SWEEP_ENABLED=true.',
+      )
+    }
+    if (swept || skippedInUse) {
+      req.payload.logger.info({ swept, skippedInUse }, 'swept expired media')
+    }
     return { output: { swept } }
   },
 }

@@ -35,7 +35,11 @@ export const Testimonials: CollectionConfig = {
     defaultColumns: ['name', 'role', 'consented', '_status', 'updatedAt'],
     description:
       'Client reviews for the homepage. A review CANNOT be published until you confirm the client actually gave it and agreed to it appearing on the website.',
-    baseFilter: () => ({ deletedAt: { exists: false } }),
+    // 🔴 NO `baseFilter` — see the long note on `projects`. Payload's own
+    // `appendNonTrashedFilter` already hides archived rows from this list, and
+    // a `baseFilter` additionally leaks into the Trash view as
+    // `deleted_at IS NULL AND deleted_at IS NOT NULL`, emptying the bin and
+    // making "Restore" unreachable. It must stay absent.
   },
 
   access: {

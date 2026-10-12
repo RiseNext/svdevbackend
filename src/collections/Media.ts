@@ -220,10 +220,28 @@ export const Media: CollectionConfig = {
       access: { ...serverOnlyField, read: isAdminField },
     },
     {
-      // Captured on replace so the sweeper can remove the superseded object.
-      // ⚠️ What happens to the OLD stored object after a replace is NOT
-      // DOCUMENTED. Capturing it ourselves makes the "an accidental replace is
-      // recoverable for 30 days" promise true regardless of what Payload does.
+      /**
+       * The storage keys this record used to point at, one per file
+       * replacement, oldest first.
+       *
+       * 🔴 THE CLAIM THAT USED TO BE HERE WAS FALSE, AND IS WORTH RECORDING.
+       * It read: "Capturing it ourselves makes the 'an accidental replace is
+       * recoverable for 30 days' promise true regardless of what Payload does."
+       * It did not. `@payloadcms/plugin-cloud-storage`'s `afterChange` destroyed
+       * the previous object — original AND generated thumbnail — in the SAME
+       * request, with `invalidate: true` purging the CDN, roughly three
+       * hook-steps after this field recorded the name. So the field held an
+       * accurate list of filenames that no longer existed anywhere.
+       *
+       * It is true NOW, and because of a different mechanism:
+       * `captureReplacedFile` sets `req.context.skipStorageDelete`, and
+       * `src/media/cloudinary.ts` `handleDelete` returns early on it, so a
+       * replaced object genuinely survives. This list is how you find it.
+       *
+       * 🔶 Collection is still MANUAL. `sweepDeletedMedia` removes soft-deleted
+       * ROWS, not superseded keys — see the scope limit on that task for why,
+       * and what it would take to automate.
+       */
       name: 'supersededFilenames',
       type: 'text',
       hasMany: true,

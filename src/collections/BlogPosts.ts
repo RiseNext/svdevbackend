@@ -53,7 +53,12 @@ export const BlogPosts: CollectionConfig = {
       'Articles and video posts for the Blog page. Newest first is the public order, taken from “Published date” — the first post is shown as the large feature card. A post needs at least one of: paragraphs, a YouTube link, or an external article link.',
     // Same archive semantics as `projects`: a trashed post leaves the admin
     // list but its row survives, so an archived URL 404s rather than 500s.
-    baseFilter: () => ({ deletedAt: { exists: false } }),
+    //
+    // 🔴 NO `baseFilter` — see the long note on `projects`. Payload's own
+    // `appendNonTrashedFilter` already hides archived rows from this list, and
+    // a `baseFilter` additionally leaks into the Trash view as
+    // `deleted_at IS NULL AND deleted_at IS NOT NULL`, which emptied the bin
+    // and made "Restore" unreachable. It must stay absent.
     preview: (doc) =>
       typeof doc?.slug === 'string'
         ? `${process.env.REVALIDATE_WEBHOOK_URL?.replace(/\/api\/revalidate$/, '') ?? ''}/blog/${doc.slug}`

@@ -92,6 +92,26 @@ export const envSchema = z
     // only effect is to open a door nothing uses.
     CRON_SECRET: z.string().min(32).optional(),
     ENABLE_JOB_WORKERS: bool.default(false),
+
+    /**
+     * 🔴 THE ARM SWITCH FOR `sweepDeletedMedia`, AND IT DEFAULTS TO OFF.
+     *
+     * That task hard-deletes Cloudinary objects, with CDN invalidation, and the
+     * deletion is irreversible. It had never actually deleted anything — it
+     * passed `trash: false` to `payload.delete` against rows whose `deletedAt`
+     * IS set, so `appendNonTrashedFilter` hid every candidate from the lookup
+     * and each iteration threw `NotFound` into the task's own catch while the
+     * task still reported success. Fixing that bug turns a years-dormant job
+     * into a live destroyer on its next scheduled run.
+     *
+     * So the fix ships DISARMED. With this false the task does the full scan,
+     * runs the real in-use checks and logs exactly what it WOULD remove —
+     * then removes nothing. An operator reads a night or two of that output,
+     * satisfies themselves the candidate list is right, and only then sets this
+     * to `true`. Flipping it is a deliberate, reviewable act; discovering it
+     * the morning after it deleted the wrong thing is not.
+     */
+    MEDIA_SWEEP_ENABLED: bool.default(false),
     REVALIDATE_WEBHOOK_URL: z.string().url().optional(),
     REVALIDATE_SECRET: z.string().min(16).optional(),
 
@@ -210,6 +230,7 @@ export const ENV_KEYS = [
   'CLOUDINARY_DELIVERY_BASE_URL',
   'CRON_SECRET',
   'ENABLE_JOB_WORKERS',
+  'MEDIA_SWEEP_ENABLED',
   'REVALIDATE_WEBHOOK_URL',
   'REVALIDATE_SECRET',
   'LOG_LEVEL',

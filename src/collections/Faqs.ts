@@ -22,7 +22,13 @@ export const Faqs: CollectionConfig = {
     defaultColumns: ['question', '_status', 'updatedAt'],
     description:
       'Questions and answers shown on the homepage and the contact page. Drag to reorder — the first one is open by default.',
-    baseFilter: () => ({ deletedAt: { exists: false } }),
+    // 🔴 NO `baseFilter` — see the long note on `projects`. Payload's own
+    // `appendNonTrashedFilter` already hides archived rows from this list, and
+    // a `baseFilter` additionally leaks into the Trash view as
+    // `deleted_at IS NULL AND deleted_at IS NOT NULL`, emptying the bin and
+    // making "Restore" unreachable. It must stay absent — and it matters here
+    // because `question` is UNIQUE, so an archived FAQ keeps owning its text
+    // and the only way to free it is to find and restore (or purge) that row.
   },
 
   access: {

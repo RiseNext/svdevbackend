@@ -23,9 +23,23 @@ export const Statistics: CollectionConfig = {
     group: 'Content',
     useAsTitle: 'label',
     defaultColumns: ['label', 'value', '_status', 'updatedAt'],
+    /**
+     * 🔴 CORRECTED. This used to promise "The four-up figure strip on the
+     * homepage and the About page" and warn to "publish four, or the row goes
+     * ragged". Both bands were REMOVED from the frontend, and
+     * `svfrontend/src/app/page.tsx` + `about/page.tsx` now bind `getStatistics()`
+     * to an empty destructuring slot — the data is fetched and discarded. An
+     * administrator who read the old text, published four rows and then went
+     * looking for them on the website was misled by the panel itself.
+     */
     description:
-      'The four-up figure strip on the homepage and the About page. The grid is exactly FOUR columns — publish four, or the row goes ragged. These figures are TYPED IN, never calculated: the database does not know how many plots have been handed over.',
-    baseFilter: () => ({ deletedAt: { exists: false } }),
+      'NOT CURRENTLY DISPLAYED ON THE WEBSITE. The figure strip that showed these was removed from the homepage and the About page, so editing anything here changes nothing a visitor can see. The records are kept, and putting a figure strip back is a developer change. These figures are TYPED IN, never calculated: the database does not know how many plots have been handed over.',
+    // 🔴 NO `baseFilter` — see the long note on `projects`. Payload's own
+    // `appendNonTrashedFilter` already hides archived rows from this list, and
+    // a `baseFilter` additionally leaks into the Trash view as
+    // `deleted_at IS NULL AND deleted_at IS NOT NULL`, emptying the bin and
+    // making "Restore" unreachable. It must stay absent — and as with `faqs`,
+    // `label` is UNIQUE, so an archived row keeps owning its label.
   },
 
   access: {

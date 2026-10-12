@@ -5,6 +5,8 @@ import {
   type CollectionBeforeDeleteHook,
 } from 'payload'
 
+import { preservingReq } from '@/lib/nestedWrite'
+
 /**
  * MEDIA GUARDS.
  *
@@ -28,12 +30,27 @@ export const stampUploadedBy: CollectionBeforeChangeHook = ({ data, req, operati
 /**
  * On replace, the document id stays the same (so every reference survives) but a
  * NEW storage key is written, because the upload guard renames to a fresh UUID
- * on `update` as well as `create`. The OLD key is recorded here so the sweeper
- * can delete it after the grace period.
+ * on `update` as well as `create`.
  *
- * Without this, one of two things is silently true and we cannot tell which:
- * either the old object leaks forever, or Payload eagerly deleted it and the
- * "recoverable for 30 days" promise is false.
+ * This hook does TWO things, and the second one is the important one:
+ *   1. records the OLD key in `supersededFilenames`, so a replaced object can
+ *      be found later;
+ *   2. sets `req.context.skipStorageDelete`, which is what STOPS the old object
+ *      being destroyed at all.
+ *
+ * 🔴 THE QUESTION THIS COMMENT USED TO LEAVE OPEN IS NOW ANSWERED, AND THE
+ * ANSWER WAS THE BAD ONE. It read: "either the old object leaks forever, or
+ * Payload eagerly deleted it and the 'recoverable for 30 days' promise is
+ * false." Measured against the installed plugin: Payload eagerly deleted it.
+ * `@payloadcms/plugin-cloud-storage/dist/hooks/afterChange.js:82-135` treats
+ * any key absent from the new document as stale and destroys it — original and
+ * generated thumbnail — in the same request, CDN purge included. The promise
+ * was false, and this hook was recording the names of objects that had already
+ * been destroyed.
+ *
+ * Hence (2). Ordering is load-bearing: this hook runs BEFORE the plugin's,
+ * because plugin hooks are appended to the collection's own
+ * (`plugin.js:120-128`), so the flag is in place by the time the plugin looks.
  */
 export const captureReplacedFile: CollectionAfterChangeHook = async ({
   doc,
@@ -53,17 +70,46 @@ export const captureReplacedFile: CollectionAfterChangeHook = async ({
   const existing = Array.isArray(doc.supersededFilenames)
     ? (doc.supersededFilenames as string[])
     : []
+
+  /**
+   * 🔴 SET BEFORE THE EARLY RETURN AND BEFORE THE NESTED WRITE — ORDER MATTERS
+   * TWICE OVER.
+   *
+   * This flag is what stops the storage adapter destroying `before`
+   * (src/media/cloudinary.ts `handleDelete`). The plugin's own `afterChange`
+   * runs AFTER this hook, so the flag must be on `req.context` by the time this
+   * function returns.
+   *
+   * ⚠️ It is set even when we bail out below, and even when the nested write
+   * FAILS. If we cannot record the superseded key, the old object leaks until
+   * someone cleans it up by hand — which is recoverable. If we let it be
+   * destroyed instead, the bytes are gone. Preferring a leak to a loss is the
+   * whole point of this change, so the flag must not be conditional on the
+   * bookkeeping succeeding.
+   *
+   * ⚠️ NOT inside `preservingReq` — that restores `req.context` to what it was,
+   * which would discard this.
+   */
+  ;(req.context as Record<string, unknown>).skipStorageDelete = true
+
   if (existing.includes(before)) return doc
 
   try {
-    await req.payload.update({
-      collection: collection.slug as 'media' | 'documents',
-      id: doc.id,
-      overrideAccess: true,
-      req,
-      data: { supersededFilenames: [...existing, before] },
-      context: { skipAudit: true },
-    })
+    // 🔴 `preservingReq` IS LOAD-BEARING, NOT TIDINESS. This nested write
+    // shares the caller's transaction (see the helper), and passing `req`
+    // mutates it: `skipAudit: true` would stick to `req.context` and suppress
+    // `auditAfterChange`, which runs immediately after this hook. That is how
+    // every file replacement on media/documents/videos went unaudited.
+    await preservingReq(req, () =>
+      req.payload.update({
+        collection: collection.slug as 'media' | 'documents',
+        id: doc.id,
+        overrideAccess: true,
+        req,
+        data: { supersededFilenames: [...existing, before] },
+        context: { skipAudit: true },
+      }),
+    )
   } catch (err) {
     req.payload.logger.error(
       { err, id: doc.id, before },
@@ -528,4 +574,116 @@ export const videoTrashGuard: CollectionBeforeChangeHook = async ({
   const usages = await collectVideoUsages(req, id)
   if (usages.length === 0) return data
   throwVideoInUse(usages, 'moved to trash')
+}
+
+// ---------------------------------------------------------------------------
+// DOCUMENTS (PDFs)
+// ---------------------------------------------------------------------------
+
+/**
+ * 🔴 THIS WAS THE LAST UNGUARDED UPLOAD COLLECTION, AND THE ASYMMETRY WAS THE
+ * BUG. `media` had `mediaDeleteGuard` + `mediaTrashGuard`; `videos` had
+ * `videoDeleteGuard` + `videoTrashGuard`; `documents` had NEITHER. Both of its
+ * reference sites are `ON DELETE set null`, and a soft delete is enough on its
+ * own — Payload nulls any populated relation whose target carries `deletedAt`
+ * (`payload/dist/fields/hooks/afterRead/relationshipPopulationPromise.js:43`).
+ *
+ * So archiving the brochure PDF a live project links to, or the master-plan
+ * PDF, succeeded with a 200 and the download button silently disappeared from
+ * the public site. Exactly the silent-loss shape the other two guards exist to
+ * prevent, on the one collection nobody had got to yet.
+ *
+ * Only TWO reference sites exist (`relationTo: 'documents'` appears exactly
+ * twice in src/), so this is deliberately simpler than the media version.
+ */
+const collectDocumentUsages = async (
+  req: Parameters<CollectionBeforeDeleteHook>[0]['req'],
+  id: unknown,
+): Promise<Usage[]> => {
+  const usages: Usage[] = []
+
+  const refId = (value: unknown): string =>
+    value && typeof value === 'object'
+      ? String((value as { id?: unknown }).id ?? '')
+      : String(value ?? '')
+
+  // ---- 1. `site-settings.masterPlan` — the /master-plan download. ----
+  try {
+    const settings = await req.payload.findGlobal({
+      slug: 'site-settings',
+      depth: 0,
+      overrideAccess: true,
+      req,
+    })
+    const masterPlan = (settings as { masterPlan?: unknown } | null)?.masterPlan
+    if (refId(masterPlan) === String(id)) {
+      usages.push({ label: 'master plan (Site Settings)', names: ['Site settings'] })
+    }
+  } catch (err) {
+    // A genuine 409 must propagate; a missing/unreadable global is the
+    // fresh-database case the other guards already tolerate.
+    if (err instanceof APIError) throw err
+  }
+
+  // ---- 2. `projects.brochure` — the "Download brochure" buttons. ----
+  try {
+    const inProjects = await req.payload.find({
+      collection: 'projects',
+      where: { brochure: { equals: id } },
+      limit: 25,
+      depth: 0,
+      overrideAccess: true,
+      // A trashed project still holds its reference, and restoring it must not
+      // resurrect a project whose brochure was destroyed in the meantime.
+      trash: true,
+      req,
+      select: { name: true, slug: true },
+    })
+    if (inProjects.totalDocs > 0) {
+      usages.push({
+        label: 'project brochure',
+        names: inProjects.docs.map((d) => String((d as { name?: string }).name ?? d.id)),
+      })
+    }
+  } catch {
+    // The column may not exist on a database migrated only partway.
+  }
+
+  return usages
+}
+
+const throwDocumentInUse = (usages: Usage[], verb: string): never => {
+  const detail = usages
+    .map((u) => `${u.label}: ${u.names.slice(0, 5).join(', ')}${u.names.length > 5 ? ', …' : ''}`)
+    .join(' · ')
+
+  throw new APIError(
+    `This PDF is still in use and was not ${verb} — the download link would silently disappear from the website. Remove it from these first (that takes it off the site without destroying the file), then try again. In use as — ${detail}`,
+    409,
+  )
+}
+
+/** The HARD-delete path. See `documentTrashGuard` for the one the admin UI uses. */
+export const documentDeleteGuard: CollectionBeforeDeleteHook = async ({ req, id }) => {
+  const usages = await collectDocumentUsages(req, id)
+  if (usages.length === 0) return
+  throwDocumentInUse(usages, 'deleted')
+}
+
+/** THE TRASH PATH — the one the Admin Panel's Delete button actually takes. */
+export const documentTrashGuard: CollectionBeforeChangeHook = async ({
+  req,
+  data,
+  originalDoc,
+  operation,
+}) => {
+  if (operation !== 'update') return data
+  if (!isBeingTrashed(data as Record<string, unknown>, originalDoc)) return data
+
+  const id = (originalDoc as { id?: unknown } | undefined)?.id
+  if (!id) return data
+
+  const usages = await collectDocumentUsages(req, id)
+  if (usages.length === 0) return data
+  throwDocumentInUse(usages, 'moved to trash')
 }

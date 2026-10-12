@@ -6,6 +6,7 @@ import type {
 } from 'payload'
 
 import type { AuditActionValue } from '@/lib/constants'
+import { preservingReq } from '@/lib/nestedWrite'
 
 /**
  * THE AUDIT LOG — and why Payload's version history does NOT satisfy it.
@@ -134,25 +135,30 @@ type WriteArgs = {
 export const writeAuditRow = async (args: WriteArgs): Promise<void> => {
   const { req, action, entityType, entityId, changes } = args
   try {
-    await req.payload.create({
-      collection: 'audit-log',
-      // `create: () => false` blocks REST/GraphQL/admin. Hooks are the only
-      // sanctioned writer, and this flag is what lets them through.
-      overrideAccess: true,
-      // Share the mutation's transaction so the audit row and the change commit
-      // or roll back together.
-      req,
-      data: {
-        adminUser: (req.user?.id as string | undefined) ?? null,
-        action,
-        entityType,
-        entityId,
-        changes: changes ?? null,
-        ipAddress: clientIp(req),
-      },
-      // Prevent recursion if anything is ever hooked onto audit-log itself.
-      context: { skipAudit: true },
-    })
+    // 🔴 `preservingReq` — without it the `skipAudit: true` below sticks to
+    // `req.context` for the rest of the request, so a mutation that writes TWO
+    // audited documents loses the second row. See src/lib/nestedWrite.ts.
+    await preservingReq(req, () =>
+      req.payload.create({
+        collection: 'audit-log',
+        // `create: () => false` blocks REST/GraphQL/admin. Hooks are the only
+        // sanctioned writer, and this flag is what lets them through.
+        overrideAccess: true,
+        // Share the mutation's transaction so the audit row and the change
+        // commit or roll back together.
+        req,
+        data: {
+          adminUser: (req.user?.id as string | undefined) ?? null,
+          action,
+          entityType,
+          entityId,
+          changes: changes ?? null,
+          ipAddress: clientIp(req),
+        },
+        // Prevent recursion if anything is ever hooked onto audit-log itself.
+        context: { skipAudit: true },
+      }),
+    )
   } catch (err) {
     req.payload.logger.error(
       { err, action, entityType, entityId },

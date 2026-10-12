@@ -115,9 +115,24 @@ export const LEAD_PII_RETENTION_DAYS = 90
 
 /**
  * OQ-17: grace period before a soft-deleted media object is really removed from
- * storage. Applied to BOTH deletes and replaces — capturing the previous
- * filename on replace makes the behaviour independent of whatever Payload does
- * internally, which is undocumented.
+ * storage.
+ *
+ * 🔴 SCOPE CORRECTED. This used to claim it was "applied to BOTH deletes and
+ * replaces". Neither half was true:
+ *   · DELETES — `sweepDeletedMedia` passed `trash: false` to `payload.delete`
+ *     against rows whose `deletedAt` IS set, so every candidate was hidden from
+ *     the lookup, each iteration threw `NotFound`, and NOTHING was ever
+ *     removed. The grace period expired onto a no-op.
+ *   · REPLACES — the storage plugin destroyed the previous object immediately,
+ *     in the same request. There was no grace at all, let alone 30 days.
+ *
+ * Both are fixed, but they are fixed to DIFFERENT behaviours, so read this as
+ * applying to deletes only:
+ *   · DELETES — this is the real, enforced window, gated behind
+ *     `MEDIA_SWEEP_ENABLED`.
+ *   · REPLACES — the previous object is now PRESERVED INDEFINITELY and listed
+ *     in `supersededFilenames`; collection is manual. See the scope limit on
+ *     `sweepDeletedMedia`.
  */
 export const MEDIA_GRACE_PERIOD_DAYS = 30
 

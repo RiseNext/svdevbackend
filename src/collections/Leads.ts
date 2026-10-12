@@ -55,7 +55,13 @@ export const Leads: CollectionConfig = {
     defaultColumns: ['name', 'phone', 'projectNameSnapshot', 'source', 'createdAt'],
     description:
       'Enquiries from the website contact form. A lead is a COMMERCIAL RECORD — archive it, never delete it.',
-    baseFilter: () => ({ deletedAt: { exists: false } }),
+    // 🔴 NO `baseFilter` — see the long note on `projects`. Payload's own
+    // `appendNonTrashedFilter` already hides archived enquiries from this list,
+    // and a `baseFilter` additionally leaks into the Trash view as
+    // `deleted_at IS NULL AND deleted_at IS NOT NULL`, which emptied the bin.
+    // That mattered most here: `blockLeadHardDelete` refuses a permanent delete
+    // unconditionally, so with an empty bin an archived lead — a COMMERCIAL
+    // RECORD — could not be recovered through the panel at all.
     pagination: { defaultLimit: 50 },
   },
 

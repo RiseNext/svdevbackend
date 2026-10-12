@@ -412,13 +412,34 @@ feature is a **paid add-on that is not assumed to be enabled**.
 What does exist, and what it is worth:
 
 - `supersededFilenames` records the previous Cloudinary key on every **replace**,
-  and the sweep only removes it after **30 days** — so a wrong replace is
-  recoverable for a month.
-- The delete guards refuse to remove an asset that is still attached to a
-  project, and a soft delete waits **30 days** before the object is really gone.
+  and that object is now **preserved indefinitely** — `handleDelete` returns
+  early on the replace path (`src/media/cloudinary.ts`). So a wrong replace is
+  recoverable, but only by a developer: nothing in the admin panel restores it,
+  and nothing collects it either.
+- The delete guards refuse to remove an asset still attached to a project, a
+  blog post, a video poster or the hero — **and `documents` is now covered too**,
+  on both the hard-delete and the trash path.
+- A soft delete is reversible from the **Trash** tab in the admin panel.
 
-So the honest position is: **a wrong delete or a wrong replace is recoverable for
-30 days; a Cloudinary account loss is not.**
+🔴 **CORRECTED — THE PREVIOUS WORDING WAS WRONG IN BOTH HALVES, AND IT WAS WRONG
+IN THE DIRECTION THAT MATTERS.** It claimed "the sweep only removes it after 30
+days — so a wrong replace is recoverable for a month" and "a soft delete waits 30
+days before the object is really gone". Measured:
+
+- A **replace** destroyed the previous object *immediately*, in the same request,
+  with `invalidate: true` purging the CDN. There was no 30-day window and no
+  recovery at all. (Fixed — the object is now kept.)
+- A **soft delete** never removed the object *ever*: `sweepDeletedMedia` passed
+  `trash: false` to `payload.delete` against rows whose `deletedAt` is set, so
+  every candidate was hidden from the lookup, each iteration threw `NotFound`
+  into the task's own catch, and the task still reported success. (Fixed, but
+  shipped **disarmed** behind `MEDIA_SWEEP_ENABLED`.)
+
+So the honest position *now*: **a wrong delete is reversible from the Trash tab;
+a wrong replace is recoverable only with developer help; a Cloudinary account
+loss is not recoverable at all.** And while `MEDIA_SWEEP_ENABLED=false`, no
+Cloudinary object is ever removed by automation — which is safe, but means
+storage grows and the 30-day figure below is a ceiling that is not yet enforced.
 
 **The owner decision, stated once so it can actually be made:** enabling
 Cloudinary's backup add-on is a cost decision. If it is not enabled, the

@@ -2,7 +2,12 @@ import type { CollectionConfig } from 'payload'
 
 import { anyone, isAdmin, isAdminField, serverOnlyField } from '@/access'
 import { auditAfterChange, auditAfterDelete } from '@/hooks/audit'
-import { captureReplacedFile, stampUploadedBy } from '@/hooks/mediaGuards'
+import {
+  captureReplacedFile,
+  documentDeleteGuard,
+  documentTrashGuard,
+  stampUploadedBy,
+} from '@/hooks/mediaGuards'
 import { applyUploadGuardValues, documentUploadGuard } from '@/hooks/uploadGuard'
 
 /**
@@ -77,8 +82,15 @@ export const Documents: CollectionConfig = {
 
   hooks: {
     beforeOperation: [documentUploadGuard],
-    beforeChange: [applyUploadGuardValues, stampUploadedBy],
+    // 🔴 `documentTrashGuard` FIRST, and it is not decoration. A soft delete is
+    // an UPDATE that sets `deletedAt`, which is the path the admin's Delete
+    // button takes — so without a `beforeChange` guard, archiving the brochure
+    // a live project links to succeeded with a 200 and the download button
+    // silently vanished from the public page. `documents` was the only upload
+    // collection with no in-use protection on either path.
+    beforeChange: [documentTrashGuard, applyUploadGuardValues, stampUploadedBy],
     afterChange: [captureReplacedFile, auditAfterChange],
+    beforeDelete: [documentDeleteGuard],
     afterDelete: [auditAfterDelete],
   },
 

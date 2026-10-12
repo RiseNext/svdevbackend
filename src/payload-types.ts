@@ -264,7 +264,7 @@ export interface Media {
   };
 }
 /**
- * The project catalogue. NOTE: until the website’s navigation is wired to this list, a newly published project appears at /projects, in the sitemap and at its own address, but NOT yet in the header dropdown or the footer column. Publishing a sixth project also requires a copy change on the homepage, which currently reads “Five layouts.”
+ * The project catalogue. Drag rows to set the order they appear on the website. A newly published project appears at /projects, at its own address, in the header dropdown, the footer column and the sitemap — all derived from this list, with no code change needed.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "projects".
@@ -294,7 +294,7 @@ export interface Project {
    */
   tagline?: string | null;
   /**
-   * Rendered as the LARGE HEADING on the detail page — not as a paragraph. Keep it to a sentence or two.
+   * The opening paragraph of the Overview section on the project page, set in larger type. Keep it to a sentence or two — the heading above it is generated from the project name.
    */
   summary: string;
   /**
@@ -323,7 +323,7 @@ export interface Project {
       }[]
     | null;
   /**
-   * The headline selling points. At least one is required — this section is not guarded in the page template.
+   * The headline selling points, shown as the “What this layout is made of” band. Strongly recommended, but not enforced — leave it empty and that band simply does not appear on the project page.
    */
   highlights: {
     /**
@@ -631,7 +631,7 @@ export interface Project {
    */
   locationMap?: (string | null) | Media;
   /**
-   * The project brochure as a PDF, chosen from Documents. Upload it under Media → Documents first, or use “Create New” here. ⚠️ NOT YET RENDERED ON THE WEBSITE: this field is editable now so brochures can be collected, but the public project page has no download link for it yet, so setting it changes nothing visible to a visitor.
+   * The project brochure as a PDF, chosen from Documents. Upload it under Media → Documents first, or use “Create New” here. Shown on the project page as a “Download brochure” button. Removing it from here is the only way to take the download off the site — the PDF cannot be deleted from Documents while a project still links to it.
    */
   brochure?: (string | null) | Document;
   /**
@@ -935,7 +935,7 @@ export interface Faq {
   _status?: ('draft' | 'published') | null;
 }
 /**
- * The four-up figure strip on the homepage and the About page. The grid is exactly FOUR columns — publish four, or the row goes ragged. These figures are TYPED IN, never calculated: the database does not know how many plots have been handed over.
+ * NOT CURRENTLY DISPLAYED ON THE WEBSITE. The figure strip that showed these was removed from the homepage and the About page, so editing anything here changes nothing a visitor can see. The records are kept, and putting a figure strip back is a developer change. These figures are TYPED IN, never calculated: the database does not know how many plots have been handed over.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "statistics".

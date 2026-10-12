@@ -36,6 +36,7 @@ const parsed = envSchema.safeParse({
 
   CRON_SECRET: process.env.CRON_SECRET || undefined,
   ENABLE_JOB_WORKERS: process.env.ENABLE_JOB_WORKERS,
+  MEDIA_SWEEP_ENABLED: process.env.MEDIA_SWEEP_ENABLED,
   REVALIDATE_WEBHOOK_URL: process.env.REVALIDATE_WEBHOOK_URL || undefined,
   REVALIDATE_SECRET: process.env.REVALIDATE_SECRET || undefined,
 

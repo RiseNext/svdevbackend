@@ -80,7 +80,13 @@ const loadAdapter = async () => {
     // Declared so the delete-side cases are type-checked too: upload and delete
     // must agree on `resource_type`, and that agreement is what stops a video
     // from being silently orphaned in Cloudinary.
-    handleDelete: (args: { filename: string; storageFilePath: string }) => Promise<unknown>
+    handleDelete: (args: {
+      filename: string
+      storageFilePath: string
+      // Passed by the plugin on both the replace and the real-delete path. The
+      // adapter reads `req.context.skipStorageDelete` off it to tell them apart.
+      req?: { context?: Record<string, unknown> }
+    }) => Promise<unknown>
   }
 }
 
@@ -366,5 +372,104 @@ describe('cloudinary handleDelete — upload and delete MUST agree on resource_t
     const uploadedId = captured.at(-1)!.options.public_id
     const [destroyedId] = destroy.mock.calls.at(-1) as [string]
     expect(destroyedId).toBe(uploadedId)
+  })
+})
+
+/**
+ * REPLACE PRESERVATION — the data-loss fix for file replacement.
+ *
+ * 🔴 WHAT WAS WRONG. `@payloadcms/plugin-cloud-storage`'s `afterChange` calls
+ * `handleDelete` on every key absent from the NEW document
+ * (dist/hooks/afterChange.js:82-135). `uploadGuard` renames every upload that
+ * carries bytes — updates included — to a fresh `randomUUID()`, so on a replace
+ * the previous key is ALWAYS "absent" and was always destroyed: original and
+ * generated thumbnail, in the same request, with `invalidate: true` purging the
+ * CDN. An accidental wrong-file replacement was unrecoverable the instant Save
+ * was pressed, and the repo's own "recoverable for 30 days" promise was false.
+ *
+ * THE FIX. `captureReplacedFile` sets `req.context.skipStorageDelete` before the
+ * plugin's hook runs (plugin hooks are appended after the collection's own), and
+ * the adapter returns early on it. These tests pin both directions, because the
+ * flag must be narrow: a REAL delete has to keep destroying.
+ */
+describe('handleDelete preserves the previous object on a replace', () => {
+  const getDestroyMock = async () => {
+    const mod = (await import('cloudinary')) as unknown as {
+      v2: { uploader: { destroy: ReturnType<typeof vi.fn> } }
+    }
+    return mod.v2.uploader.destroy
+  }
+
+  it('destroys normally when there is no req at all (sweeper / afterDelete path)', async () => {
+    const adapter = await loadAdapter()
+    const destroy = await getDestroyMock()
+
+    await adapter.handleDelete({ filename: 'a.jpg', storageFilePath: 'media/a.jpg' })
+
+    expect(destroy).toHaveBeenCalledTimes(1)
+    const [publicId, opts] = destroy.mock.calls.at(-1) as [string, Record<string, unknown>]
+    expect(publicId).toContain('media/a')
+    expect(opts.invalidate).toBe(true)
+  })
+
+  it('destroys normally when req.context carries no flag (ordinary delete)', async () => {
+    const adapter = await loadAdapter()
+    const destroy = await getDestroyMock()
+
+    await adapter.handleDelete({
+      filename: 'b.jpg',
+      storageFilePath: 'media/b.jpg',
+      req: { context: { skipAudit: true } },
+    })
+
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('🔴 does NOT destroy when skipStorageDelete is set (the replace path)', async () => {
+    const adapter = await loadAdapter()
+    const destroy = await getDestroyMock()
+
+    await adapter.handleDelete({
+      filename: 'old.jpg',
+      storageFilePath: 'media/old.jpg',
+      req: { context: { skipStorageDelete: true } },
+    })
+
+    expect(
+      destroy,
+      'a replaced object must survive — this is the data-loss fix',
+    ).not.toHaveBeenCalled()
+  })
+
+  it('does not destroy the generated thumbnail either', async () => {
+    const adapter = await loadAdapter()
+    const destroy = await getDestroyMock()
+
+    // The plugin issues one handleDelete per stale key: original + each size.
+    for (const key of ['media/old.jpg', 'media/old-400x300.jpg']) {
+      await adapter.handleDelete({
+        filename: key.split('/')[1]!,
+        storageFilePath: key,
+        req: { context: { skipStorageDelete: true } },
+      })
+    }
+
+    expect(destroy).not.toHaveBeenCalled()
+  })
+
+  it('a falsy flag still destroys — the guard must not be truthiness-by-accident', async () => {
+    const adapter = await loadAdapter()
+    const destroy = await getDestroyMock()
+
+    await adapter.handleDelete({
+      filename: 'c.mp4',
+      storageFilePath: 'videos/c.mp4',
+      req: { context: { skipStorageDelete: false } },
+    })
+
+    expect(destroy).toHaveBeenCalledTimes(1)
+    const [, opts] = destroy.mock.calls.at(-1) as [string, Record<string, unknown>]
+    // And the video resource type still agrees with the upload side.
+    expect(opts.resource_type).toBe('video')
   })
 })
