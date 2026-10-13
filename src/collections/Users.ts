@@ -10,7 +10,17 @@ import {
 } from '@/lib/constants'
 import { isProduction } from '@/lib/env'
 import { isBreachedPassword } from '@/lib/passwordPolicy'
-import { auditForgotPassword, auditLogin, auditLogout } from '@/hooks/authEvents'
+import { auditAfterChange } from '@/hooks/audit'
+import {
+  auditAuthFailure,
+  auditForgotPassword,
+  auditLogin,
+  auditLogout,
+  auditPasswordChangeHook,
+  blockInactiveLogin,
+  flagPasswordChange,
+  revokeSessionsOnDeactivate,
+} from '@/hooks/authEvents'
 
 /**
  * `email` is auth-injected. We REDEFINE it purely to attach a lowercasing hook.
@@ -119,9 +129,37 @@ export const Users: CollectionConfig = {
   defaultSort: 'email',
 
   hooks: {
+    // 🔴 `beforeLogin` RUNS AFTER THE PASSWORD IS VERIFIED AND BEFORE A SESSION
+    // IS ISSUED, which is what makes it the correct place to refuse a
+    // deactivated account. Without it, unticking `isActive` closed
+    // authorisation but left authentication working — measured in a browser as
+    // a successful login — and the only mitigation was a two-step procedure in
+    // the runbook. See `blockInactiveLogin`.
+    beforeLogin: [blockInactiveLogin],
     afterLogin: [auditLogin],
     afterLogout: [auditLogout],
     afterForgotPassword: [auditForgotPassword],
+    // ⚠️ TWO HOOKS, AND THE SPLIT IS FORCED. `data.password` is stripped by
+    // Payload between `beforeChange` and `afterChange`
+    // (collections/operations/utilities/update.js:299), so the fact has to be
+    // captured in `beforeChange` and the row written in `afterChange` once the
+    // change has actually committed.
+    beforeChange: [flagPasswordChange],
+    // ⚠️ ORDER MATTERS. `revokeSessionsOnDeactivate` runs LAST so that the
+    // ordinary `update` audit row is written before the `logout` row that
+    // records the revocation — an auditor reading the log top to bottom sees
+    // the cause before the effect.
+    afterChange: [auditPasswordChangeHook, auditAfterChange, revokeSessionsOnDeactivate],
+    /**
+     * 🔴 THE ONLY SEAM THAT SEES A FAILED LOGIN. `login_failed` and `lockout`
+     * were in the audit enum from the first migration and nothing ever wrote
+     * them, because the failure throws at `login.js:185` — before `beforeLogin`
+     * — and `incrementLoginAttempts` writes through the raw adapter, below the
+     * hook layer. `afterError` is reached via `handleEndpoints` -> `routeError`,
+     * and the admin panel's login form posts to that same REST endpoint. See
+     * the long note on `auditAuthFailure`.
+     */
+    afterError: [auditAuthFailure],
   },
 
   fields: [
@@ -176,8 +214,14 @@ export const Users: CollectionConfig = {
       defaultValue: true,
       admin: {
         position: 'sidebar',
+        // ⚠️ THIS TEXT PREVIOUSLY DESCRIBED A TWO-STEP PROCEDURE ("you must ALSO
+        // change this user's password"). That was accurate when written and is
+        // no longer true: `revokeSessionsOnDeactivate` now ends every session on
+        // the spot. Help text that overstates what an operator must do is a
+        // defect in its own right — it teaches a ritual that is not required and
+        // invites the reader to doubt the control that is actually there.
         description:
-          'Disable instead of deleting — audit attribution must survive. NOTE: unticking this closes the authorisation door on the next request, but does NOT end an existing session. To fully revoke access you must ALSO change this user’s password as an admin, which ends all of their sessions. See the deactivation runbook.',
+          'Disable instead of deleting — audit attribution must survive. Unticking this takes effect immediately: the account can no longer sign in, and any session it already has is ended on its next request. No second step is needed.',
       },
     },
   ],

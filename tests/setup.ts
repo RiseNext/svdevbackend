@@ -23,12 +23,50 @@ import { getPayload, type Payload } from 'payload'
 
 let instance: Payload | null = null
 
+/**
+ * 🔴 THE TEST DATABASE IS BUILT BY DRIZZLE `push`, NOT BY MIGRATIONS.
+ *
+ * `payload_migrations` in `sv_test` contains exactly one row, named `dev` —
+ * the marker Payload writes when the schema was pushed rather than migrated.
+ * Production (Neon) is migrations-only. So any schema change expressed ONLY as
+ * a hand-written migration exists in production and NOWHERE in the suite, and
+ * a test asserting it would pass locally for the wrong reason or fail for a
+ * reason that is not a product defect.
+ *
+ * That gap is real and it bit D-8: `unique: true` makes Drizzle push a PLAIN
+ * unique index, and the partial-index fix lives in raw SQL that push never
+ * sees.
+ *
+ * So the suite applies those migrations itself, by CALLING THE MIGRATION'S OWN
+ * `up()` — not a hand-copied SQL twin, which would be free to drift from the
+ * thing that actually runs in production. `up()` is written idempotently
+ * (`DROP INDEX IF EXISTS` then `CREATE`), so repeating it is harmless.
+ *
+ * Only migrations whose effect push cannot reproduce belong here. Everything
+ * else is already in the pushed schema by definition.
+ */
+const applyPushInvisibleMigrations = async (payload: Payload): Promise<void> => {
+  const url = process.env.DATABASE_URL ?? ''
+  // Same belt-and-braces guard as `resetDb.ts`. This writes DDL, so it must
+  // never be able to fire against the dev sandbox or production.
+  if (!(/sv_test/.test(url) && /:5433\//.test(url))) {
+    throw new Error(
+      'REFUSING TO PATCH SCHEMA: DATABASE_URL does not look like the test database ' +
+        '(expected sv_test on :5433).',
+    )
+  }
+
+  const { up } = await import('@/migrations/20261013_090000_partial_unique_active_only')
+  await up({ db: payload.db.drizzle, payload, req: undefined } as never)
+}
+
 export const getTestPayload = async (): Promise<Payload> => {
   if (!instance) {
     // Imported lazily so that a test which only exercises pure functions does
     // not pay for a database connection.
     const { default: config } = await import('@payload-config')
     instance = await getPayload({ config })
+    await applyPushInvisibleMigrations(instance)
   }
   return instance
 }

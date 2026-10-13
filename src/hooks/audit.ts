@@ -60,6 +60,39 @@ const SENSITIVE_FIELDS = [
   'whatsapp',
   'url',
   'legalName',
+  /**
+   * 🔴 `filename` — ADDED, AND IT SOLVES A PROBLEM THAT LOOKED LIKE IT NEEDED A
+   * MIGRATION.
+   *
+   * On `media`/`documents`/`videos` the filename IS the storage key, and it
+   * changes on every file replacement (the upload guard renames to a fresh
+   * UUID). Without it in this list, replacing a file produced an audit row with
+   * `changes: null` — recording that something was edited but not WHICH object
+   * was superseded. That was the audit gap.
+   *
+   * It is also, as a side effect, the fix for the `supersededFilenames`
+   * timestamp problem. `sweepDeletedMedia`'s scope limit says safe collection of
+   * replaced objects is impossible because `supersededFilenames` is a bare
+   * `string[]` with no record of WHEN each key was superseded, and that the
+   * remedy was to restructure the field into `{ filename, replacedAt }[]` — a
+   * child table, a migration and a backfill.
+   *
+   * ⚠️ THAT MIGRATION IS NOT NEEDED. `audit_log` already is an append-only,
+   * timestamped store, and this one entry puts the superseded key in it. "Which
+   * storage objects were superseded more than N days ago" becomes a query —
+   * `action=update`, `entityType=media`, `changes->filename->>'from'`, filtered
+   * on `createdAt` — against a table that cannot be edited through any
+   * interface. That is a STRONGER guarantee than a mutable array field on the
+   * document would have given, at zero migration risk.
+   *
+   * It does NOT arm any cleanup. `MEDIA_SWEEP_ENABLED` stays off and the sweeper
+   * still does not touch superseded keys; this only makes a future, separately
+   * reviewed implementation possible on real data instead of a guess.
+   *
+   * Scoped naturally: only upload collections have a `filename`, so nothing
+   * else's audit rows change. It is not lead PII — `leads` has no filename.
+   */
+  'filename',
 ] as const
 
 const clientIp = (req: PayloadRequest): string | null => {
@@ -108,6 +141,35 @@ export const deriveAction = (
   previous: Record<string, unknown> | null | undefined,
   next: Record<string, unknown>,
 ): AuditActionValue => {
+  /**
+   * 🔴 `restore` IS DERIVED HERE, AND IT HAD TO BE DERIVED SOMEWHERE.
+   *
+   * `restore` has been in `AUDIT_ACTIONS` — and in the Postgres enum — since
+   * the first migration, and NOTHING EVER WROTE IT. Verified empirically: the
+   * count of `restore` rows was zero after a full archive/restore round trip
+   * across all six content collections.
+   *
+   * The reason it was missed is the same reason archiving is logged as
+   * `update`: a soft delete and an un-delete are both ordinary updates that set
+   * or clear `deletedAt`, so there is no distinct operation and no hook of
+   * their own. Deriving from the delta is exactly how `publish`/`unpublish`
+   * already work, so this is the established pattern rather than a new one.
+   *
+   * ⚠️ CHECKED BEFORE `_status`. Restoring a trashed document that was
+   * published also restores `_status: 'published'`, so the publish branch below
+   * would otherwise claim the event and the restore would be invisible again —
+   * recorded as a `publish` that nobody performed. The `deletedAt` transition is
+   * the more specific fact, so it wins.
+   *
+   * ⚠️ ARCHIVING IS DELIBERATELY STILL `update`. The enum has no `archive`
+   * value, and reusing `delete` would make a reversible archive
+   * indistinguishable from a permanent destruction in the one record an auditor
+   * relies on. Left alone pending a decision on adding the value.
+   */
+  const wasTrashed = Boolean(previous?.deletedAt)
+  const isTrashed = Boolean(next.deletedAt)
+  if (operation === 'update' && wasTrashed && !isTrashed) return 'restore'
+
   const before = previous?._status
   const after = next._status
   if (after === 'published' && before !== 'published') return 'publish'

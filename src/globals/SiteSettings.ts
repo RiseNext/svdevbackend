@@ -4,9 +4,12 @@ import { anyone, isAdmin } from '@/access'
 import { iconField } from '@/fields/iconField'
 import { FORMATS, placeholderText } from '@/fields/placeholderText'
 import { uniqueByKey } from '@/fields/featureItemFields'
+import { validateMediaRows } from '@/fields/mediaRows'
+import { validateYoutubeUrl } from '@/fields/youtubeUrl'
 import { LIMITS, MAX_ARRAY_ROWS } from '@/lib/constants'
 import { auditGlobalAfterChange } from '@/hooks/audit'
 import { revalidateEverything } from '@/hooks/revalidate'
+import { surfaceValidationErrors } from '@/hooks/surfaceValidation'
 
 /**
  * `site-settings` — THE ONLY GLOBAL.
@@ -25,6 +28,55 @@ import { revalidateEverything } from '@/hooks/revalidate'
  * outage of the primary conversion path — without imposing a publish gate on a
  * one-field edit.
  */
+/**
+ * Validators `SiteSettings` needs in two places — on the field, and in the
+ * `beforeValidate` hook that is the only path by which their message reaches
+ * the administrator. See src/hooks/surfaceValidation.ts.
+ */
+/**
+ * 🔴 `MAX_ADDRESS_LINES` IS ENFORCED HERE, AND IT WAS NOT BEFORE.
+ *
+ * The field declares `maxRows: 5`. For a `type: 'array'` field Payload enforces
+ * that itself; for a `text` + `hasMany` field — which this is — IT DOES NOT.
+ * The admin UI's own control stops offering an Add button at the limit, so the
+ * cap looked enforced while being nothing but a UI affordance: the Local API,
+ * REST, a script or a future import could write twenty lines and Payload
+ * accepted every one.
+ *
+ * It matters because the footer renders the address as THREE STACKED LINES. A
+ * six-line address does not error anywhere; it overflows a layout nobody is
+ * watching.
+ *
+ * A config-sweep test (`tests/integration/maxRowsEnforcement.test.ts`) now walks
+ * every field in every collection and global, finds each `maxRows`, and requires
+ * the `hasMany` ones to refuse an over-long write — so the next capped scalar
+ * field added is covered the day it is added. This was the only one of the three
+ * that was unprotected; `projects.description` and `blog-posts.body` go through
+ * `validateParagraphs`, which has always checked its `maxRows`.
+ */
+const MAX_ADDRESS_LINES = 5
+
+export const validateAddressLines = (value: unknown): true | string => {
+  if (!Array.isArray(value) || value.length === 0) return 'Add at least one line.'
+  if (value.length > MAX_ADDRESS_LINES) {
+    return `Use at most ${MAX_ADDRESS_LINES} lines — the footer prints the address as stacked lines.`
+  }
+  for (const line of value) {
+    if (typeof line !== 'string' || line.trim() === '') return 'Lines cannot be empty.'
+    if (line.length > LIMITS.addressLine) {
+      return `Each line may be at most ${LIMITS.addressLine} characters.`
+    }
+  }
+  const lower = value.map((l: string) => l.trim().toLowerCase())
+  if (new Set(lower).size !== lower.length) return 'Address lines must be unique.'
+  return true
+}
+
+export const validateHeroMediaRows = validateMediaRows({
+  kinds: { image: true, video: true, youtube: true },
+  noun: 'Hero media',
+})
+
 export const SiteSettings: GlobalConfig = {
   slug: 'site-settings',
   label: 'Site Settings',
@@ -48,7 +100,30 @@ export const SiteSettings: GlobalConfig = {
 
   versions: { max: 50, drafts: false },
 
-  hooks: { afterChange: [auditGlobalAfterChange, revalidateEverything] },
+  hooks: {
+    /**
+     * 🔴 D-1. `onlyWhenPublished: false` because this global has
+     * `drafts: false` — every save is immediately live, so there is no draft
+     * state to exempt and the checks must run on every save.
+     *
+     * This is the single worst case the defect produced: the generic summary
+     * for a broken hero row read "The following field is invalid: Content" —
+     * the name of the TAB — while the authored message names the row.
+     */
+    beforeValidate: [
+      surfaceValidationErrors(
+        [
+          { path: 'address', label: 'Address', validate: validateAddressLines },
+          { path: 'heroMedia', label: 'Hero media', validate: validateHeroMediaRows },
+          { path: 'social', label: 'Social links', validate: uniqueByKey('label', 'label') },
+          { path: 'legalLinks', label: 'Legal links', validate: uniqueByKey('label', 'label') },
+          { path: 'heroTicker', label: 'Hero ticker', validate: uniqueByKey('text', 'ticker line') },
+        ],
+        { onlyWhenPublished: false },
+      ),
+    ],
+    afterChange: [auditGlobalAfterChange, revalidateEverything],
+  },
 
   fields: [
     {
@@ -133,23 +208,14 @@ export const SiteSettings: GlobalConfig = {
               hasMany: true,
               required: true,
               minRows: 1,
-              maxRows: 5,
+              // Shares the constant with `validateAddressLines` so the UI cap
+              // and the API cap cannot drift apart — the drift was the defect.
+              maxRows: MAX_ADDRESS_LINES,
               admin: {
                 description:
                   'One line per entry, in the order they should be printed. Rendered as three stacked lines — NOT a free-text block.',
               },
-              validate: (value: unknown): true | string => {
-                if (!Array.isArray(value) || value.length === 0) return 'Add at least one line.'
-                for (const line of value) {
-                  if (typeof line !== 'string' || line.trim() === '') return 'Lines cannot be empty.'
-                  if (line.length > LIMITS.addressLine) {
-                    return `Each line may be at most ${LIMITS.addressLine} characters.`
-                  }
-                }
-                const lower = value.map((l: string) => l.trim().toLowerCase())
-                if (new Set(lower).size !== lower.length) return 'Address lines must be unique.'
-                return true
-              },
+              validate: validateAddressLines,
             },
             placeholderText({
               name: 'mapUrl',
@@ -381,32 +447,7 @@ export const SiteSettings: GlobalConfig = {
                * poster from `media` there is nothing the hero can show before
                * the visitor clicks.
                */
-              validate: (value: unknown): true | string => {
-                if (value === undefined || value === null) return true
-                if (!Array.isArray(value)) return 'Hero media must be a list.'
-
-                for (const [i] of value.entries()) {
-                  const row = value[i] as Record<string, unknown> | null
-                  if (!row) continue
-                  const at = `Row ${i + 1}`
-                  const kind = row.kind
-
-                  if (kind === 'image' && !row.image) {
-                    return `${at}: choose a photograph, or change its type.`
-                  }
-                  if (kind === 'video' && !row.video) {
-                    return `${at}: choose an uploaded video, or change its type.`
-                  }
-                  if (kind === 'youtube') {
-                    const url = typeof row.youtubeUrl === 'string' ? row.youtubeUrl.trim() : ''
-                    if (!url) return `${at}: paste a YouTube link, or change its type.`
-                    if (!row.poster) {
-                      return `${at}: a YouTube entry needs a poster image — YouTube's own thumbnail cannot be used here.`
-                    }
-                  }
-                }
-                return true
-              },
+              validate: validateHeroMediaRows,
               fields: [
                 {
                   name: 'kind',
@@ -469,6 +510,12 @@ export const SiteSettings: GlobalConfig = {
                   label: 'YouTube link',
                   type: 'text',
                   maxLength: LIMITS.url,
+                  // 🔴 SERVER-SIDE FORMAT VALIDATION. Before this, a non-YouTube link
+                  // (a Vimeo URL, a channel page, a playlist, anything from YouTube
+                  // Studio) saved with a 200 and then rendered as a dead still image
+                  // forever, with nothing in the admin and nothing in any log. One
+                  // shared definition, mirrored from the frontend's `youtubeId()`.
+                  validate: validateYoutubeUrl,
                   hooks: {
                     beforeValidate: [
                       ({ value }) => (typeof value === 'string' ? value.trim() : value),

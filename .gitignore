@@ -53,3 +53,7 @@ Thumbs.db
 
 # --- Payload ---------------------------------------------------------------
 # payload-types.ts and payload-generated.schema.ts ARE committed (CI diff-checked).
+
+# Playwright artefacts (playwright.config.ts writes these to the repo root)
+test-results/
+playwright-report/

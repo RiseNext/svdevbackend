@@ -357,6 +357,22 @@ describe('PROJECT WORKFLOW — the same path the admin UI takes', () => {
   })
 
   it('rejects a half-filled cta — both-or-neither', async () => {
+    /**
+     * 🔴 ASSERTION UPDATED FOR D-1, AND THE OLD ONE WAS ASSERTING THE DEFECT.
+     *
+     * This used to match `/cta/i` — the FIELD NAME — because the only thing the
+     * error reliably carried was Payload's wrapper, and the helper's own note
+     * says asserting on the wrapper "would pass for the WRONG field".
+     *
+     * `surfaceValidationErrors` now throws the authored sentence with a
+     * human label, so the error reads:
+     *   "Call-to-action override — Fill in both the title and the description,
+     *    or leave both blank."
+     * The word "cta" is deliberately absent: an administrator has never seen a
+     * field called `cta`. Asserting the sentence is both stricter (it cannot
+     * pass for a different rule on the same field) and the thing the user
+     * actually reads.
+     */
     await expectFieldError(
       payload.create({
         collection: 'projects',
@@ -368,7 +384,7 @@ describe('PROJECT WORKFLOW — the same path the admin UI takes', () => {
         },
         context: { skipAudit: true, skipRevalidate: true },
       }),
-      /cta/i,
+      /Fill in both the title and the description/i,
     )
   })
 

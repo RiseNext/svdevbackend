@@ -3,7 +3,10 @@ import type { CollectionConfig } from 'payload'
 import { isAdmin, publishedOrAuthenticated, serverOnlyField } from '@/access'
 import { featureArray, uniqueByKey } from '@/fields/featureItemFields'
 import { iconField } from '@/fields/iconField'
+import { validateMediaRows } from '@/fields/mediaRows'
+import { validateParagraphs } from '@/fields/paragraphs'
 import { slugField } from '@/fields/slugField'
+import { validateYoutubeUrl } from '@/fields/youtubeUrl'
 import {
   LIMITS,
   MAX_ARRAY_ROWS,
@@ -15,6 +18,7 @@ import { auditAfterChange, auditAfterDelete } from '@/hooks/audit'
 import { blockProjectHardDelete } from '@/hooks/hardDeleteGuard'
 import { slugLock, stampPublishedAt } from '@/hooks/projectHooks'
 import { revalidateProject } from '@/hooks/revalidate'
+import { surfaceValidationErrors } from '@/hooks/surfaceValidation'
 
 /**
  * ★ THE CORE ENTITY.
@@ -27,6 +31,37 @@ import { revalidateProject } from '@/hooks/revalidate'
  *
  * `types/content.ts:57-105` is the contract. 25 fields.
  */
+/**
+ * The three validators `Projects` needs in TWO places: attached to their fields
+ * (API enforcement + the required asterisk) and handed to
+ * `surfaceValidationErrors` so the administrator actually sees the message.
+ * See src/hooks/surfaceValidation.ts for why both are necessary.
+ */
+export const validateProjectParagraphs = validateParagraphs({
+  maxRows: MAX_DESCRIPTION_PARAGRAPHS,
+  maxChars: LIMITS.descriptionParagraph,
+  caseInsensitiveUniqueness: true,
+  uniquenessMessage:
+    'Paragraphs must be unique — the website uses the text itself as a rendering key.',
+  required: true,
+})
+
+export const validateProjectVideoRows = validateMediaRows({
+  kinds: { video: true, youtube: true },
+  noun: 'Videos',
+})
+
+export const validateProjectCta = (value: unknown): true | string => {
+  const v = value as { title?: unknown; description?: unknown } | null | undefined
+  if (!v) return true
+  const hasTitle = typeof v.title === 'string' && v.title.trim() !== ''
+  const hasBody = typeof v.description === 'string' && v.description.trim() !== ''
+  if (hasTitle !== hasBody) {
+    return 'Fill in both the title and the description, or leave both blank.'
+  }
+  return true
+}
+
 export const Projects: CollectionConfig = {
   slug: 'projects',
 
@@ -137,7 +172,39 @@ export const Projects: CollectionConfig = {
   disableDuplicate: false,
 
   hooks: {
-    beforeValidate: [slugLock],
+    /**
+     * 🔴 D-1. `onlyWhenPublished: true` IS LOAD-BEARING. `versions.drafts.
+     * validate: false` above is a deliberate decision — an editor must be able
+     * to save a half-filled project. A hook that validated unconditionally
+     * would start rejecting draft saves that are allowed today, which is a
+     * worse defect than the invisible message it fixes.
+     */
+    beforeValidate: [
+      slugLock,
+      surfaceValidationErrors(
+        [
+          {
+            path: 'description',
+            label: 'Description paragraphs',
+            validate: validateProjectParagraphs,
+          },
+          { path: 'videos', label: 'Videos', validate: validateProjectVideoRows },
+          { path: 'cta', label: 'Call-to-action override', validate: validateProjectCta },
+          { path: 'stats', label: 'Stats', validate: uniqueByKey('label', 'label') },
+          { path: 'highlights', label: 'Highlights', validate: uniqueByKey('title', 'title') },
+          { path: 'approvals', label: 'Approvals', validate: uniqueByKey('title', 'title') },
+          { path: 'amenities', label: 'Amenities', validate: uniqueByKey('title', 'title') },
+          {
+            path: 'locationHighlights',
+            label: 'Location highlights',
+            validate: uniqueByKey('title', 'title'),
+          },
+          { path: 'proximity', label: 'Proximity', validate: uniqueByKey('place', 'place') },
+          { path: 'promoVideo.youtubeUrl', label: 'Promotion video link', validate: validateYoutubeUrl },
+        ],
+        { onlyWhenPublished: true },
+      ),
+    ],
     beforeChange: [stampPublishedAt],
     // D-006: "hard-deleting a project orphans a live URL and its sitemap entry",
     // and the frontend prerenders every project. Archive is an update that sets
@@ -294,27 +361,7 @@ export const Projects: CollectionConfig = {
               // VALIDATION-RULES.md §3 demands each 1-5000 with no empty
               // strings), and UNIQUENESS within the array (nothing in Payload
               // catches a React key collision).
-              validate: (value: unknown): true | string => {
-                if (!Array.isArray(value) || value.length === 0) {
-                  return 'Add at least one paragraph.'
-                }
-                if (value.length > MAX_DESCRIPTION_PARAGRAPHS) {
-                  return `At most ${MAX_DESCRIPTION_PARAGRAPHS} paragraphs.`
-                }
-                for (const v of value) {
-                  if (typeof v !== 'string' || v.trim() === '') {
-                    return 'Paragraphs cannot be empty.'
-                  }
-                  if (v.length > LIMITS.descriptionParagraph) {
-                    return `A paragraph may be at most ${LIMITS.descriptionParagraph} characters.`
-                  }
-                }
-                const normalised = value.map((v: string) => v.trim().toLowerCase())
-                if (new Set(normalised).size !== normalised.length) {
-                  return 'Paragraphs must be unique — the website uses the text itself as a rendering key.'
-                }
-                return true
-              },
+              validate: validateProjectParagraphs,
             },
             {
               name: 'area',
@@ -598,6 +645,12 @@ export const Projects: CollectionConfig = {
                   label: 'YouTube link',
                   type: 'text',
                   maxLength: LIMITS.url,
+                  // 🔴 SERVER-SIDE FORMAT VALIDATION. Before this, a non-YouTube link
+                  // (a Vimeo URL, a channel page, a playlist, anything from YouTube
+                  // Studio) saved with a 200 and then rendered as a dead still image
+                  // forever, with nothing in the admin and nothing in any log. One
+                  // shared definition, mirrored from the frontend's `youtubeId()`.
+                  validate: validateYoutubeUrl,
                   hooks: {
                     beforeValidate: [
                       ({ value }) => (typeof value === 'string' ? value.trim() : value),
@@ -684,28 +737,7 @@ export const Projects: CollectionConfig = {
                * svfrontend's `images.remotePatterns` — so without a poster from
                * `media` there is nothing to show before the visitor clicks.
                */
-              validate: (value: unknown): true | string => {
-                if (value === undefined || value === null) return true
-                if (!Array.isArray(value)) return 'Videos must be a list.'
-
-                for (const [i] of value.entries()) {
-                  const row = value[i] as Record<string, unknown> | null
-                  if (!row) continue
-                  const at = `Row ${i + 1}`
-
-                  if (row.kind === 'video' && !row.video) {
-                    return `${at}: choose an uploaded video, or change its type.`
-                  }
-                  if (row.kind === 'youtube') {
-                    const url = typeof row.youtubeUrl === 'string' ? row.youtubeUrl.trim() : ''
-                    if (!url) return `${at}: paste a YouTube link, or change its type.`
-                    if (!row.poster) {
-                      return `${at}: a YouTube entry needs a poster image — YouTube's own thumbnail cannot be used here.`
-                    }
-                  }
-                }
-                return true
-              },
+              validate: validateProjectVideoRows,
               fields: [
                 {
                   name: 'kind',
@@ -747,6 +779,12 @@ export const Projects: CollectionConfig = {
                   label: 'YouTube link',
                   type: 'text',
                   maxLength: LIMITS.url,
+                  // 🔴 SERVER-SIDE FORMAT VALIDATION. Before this, a non-YouTube link
+                  // (a Vimeo URL, a channel page, a playlist, anything from YouTube
+                  // Studio) saved with a 200 and then rendered as a dead still image
+                  // forever, with nothing in the admin and nothing in any log. One
+                  // shared definition, mirrored from the frontend's `youtubeId()`.
+                  validate: validateYoutubeUrl,
                   hooks: {
                     beforeValidate: [
                       ({ value }) => (typeof value === 'string' ? value.trim() : value),
@@ -820,16 +858,7 @@ export const Projects: CollectionConfig = {
               // both-or-neither. This is ASYMMETRIC with `seo`, where both
               // members are optional — mirror that exactly or `seo: {}` becomes
               // impossible and `cta: { title }` becomes possible.
-              validate: (value: unknown): true | string => {
-                const v = value as { title?: unknown; description?: unknown } | null | undefined
-                if (!v) return true
-                const hasTitle = typeof v.title === 'string' && v.title.trim() !== ''
-                const hasBody = typeof v.description === 'string' && v.description.trim() !== ''
-                if (hasTitle !== hasBody) {
-                  return 'Fill in both the title and the description, or leave both blank.'
-                }
-                return true
-              },
+              validate: validateProjectCta,
               fields: [
                 { name: 'title', type: 'text', maxLength: LIMITS.ctaTitle },
                 { name: 'description', type: 'text', maxLength: LIMITS.ctaDescription },

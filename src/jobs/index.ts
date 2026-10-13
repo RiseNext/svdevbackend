@@ -243,16 +243,44 @@ export const sweepDeletedMedia: TaskConfig<'sweepDeletedMedia'> = {
    *
    * WHY IT IS NOT DONE HERE: expiring a superseded key needs to know WHEN it
    * was superseded, and `supersededFilenames` is a bare `string[]` with no
-   * timestamps. Doing it properly means changing that field to
+   * timestamps. Doing it properly looked like it meant changing that field to
    * `{ filename, replacedAt }[]` — a child table, a migration and a backfill.
-   * The alternatives are worse: using the row's `updatedAt` as a proxy is only
+   * The alternatives were worse: using the row's `updatedAt` as a proxy is only
    * a conservative lower bound (any later edit defers cleanup indefinitely),
    * and reconstructing storage keys inside this job would duplicate the
    * plugin's own path logic — which is precisely the two-definitions-of-one-
    * thing drift that produced the in-use bug this rewrite just removed.
    *
+   * ─── ✅ THE MISSING TIMESTAMP NOW EXISTS, WITHOUT THAT MIGRATION ───────────
+   *
+   * `filename` was added to `SENSITIVE_FIELDS` (src/hooks/audit.ts), so every
+   * file replacement now writes an `audit_log` row carrying
+   * `changes.filename = { from: <superseded key>, to: <new key> }` — and an
+   * audit row is timestamped and append-only by construction.
+   *
+   * So the question this job could not answer is now a query:
+   *
+   *     SELECT changes->'filename'->>'from' AS superseded_key, entity_type, created_at
+   *     FROM audit_log
+   *     WHERE action = 'update'
+   *       AND entity_type IN ('media','documents','videos')
+   *       AND changes->'filename'->>'from' IS NOT NULL
+   *       AND created_at < now() - interval '30 days';
+   *
+   * That is a STRONGER basis than the proposed array field: `audit_log` is
+   * `create: nobody / update: nobody / delete: nobody`, so the retention record
+   * cannot be edited through any interface, whereas a document field could be.
+   *
+   * ⚠️ STILL NOT IMPLEMENTED HERE, AND DELIBERATELY SO. Having the data is not
+   * the same as being allowed to destroy bytes with it. A superseded-object
+   * collector needs its own review: the key must be confirmed absent from the
+   * CURRENT row of every upload collection (a replaced key can be re-recorded),
+   * confirmed against the live bucket rather than inferred, and gated behind the
+   * same `MEDIA_SWEEP_ENABLED` arming plus a dry run. None of that is in this
+   * release, and `MEDIA_SWEEP_ENABLED` remains OFF.
+   *
    * Until then, superseded objects are cleaned up by hand; every one of them is
-   * listed in its own row's `supersededFilenames`.
+   * listed in its own row's `supersededFilenames` AND, now, in a dated audit row.
    */
   handler: async ({ req }) => {
     const cutoff = daysAgo(MEDIA_GRACE_PERIOD_DAYS)

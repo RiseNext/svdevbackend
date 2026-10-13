@@ -2,9 +2,12 @@ import type { CollectionConfig } from 'payload'
 
 import { isAdmin, publishedOrAuthenticated } from '@/access'
 import { slugField } from '@/fields/slugField'
+import { validateParagraphs } from '@/fields/paragraphs'
+import { validateYoutubeUrl } from '@/fields/youtubeUrl'
 import { auditAfterChange, auditAfterDelete } from '@/hooks/audit'
 import { blogPublishGate, blogSlugLock } from '@/hooks/blogHooks'
 import { revalidateBlogPost } from '@/hooks/revalidate'
+import { surfaceValidationErrors } from '@/hooks/surfaceValidation'
 import { LIMITS, MAX_DESCRIPTION_PARAGRAPHS } from '@/lib/constants'
 
 /**
@@ -41,6 +44,25 @@ import { LIMITS, MAX_DESCRIPTION_PARAGRAPHS } from '@/lib/constants'
  * KIND (article/video), which is derived from `video`, not by topic — so a
  * taxonomy would be an editor screen nothing reads.
  */
+/**
+ * 🔴 NOW THE SAME FUNCTION `projects.description` USES, and that closed a real
+ * drift: this validator compared paragraphs with an EXACT match while
+ * `projects` compared them case-insensitively after trimming. Two paragraphs
+ * differing only in capitalisation were rejected on a project and accepted on a
+ * post, where they then collided as React keys on the rendered page — the exact
+ * failure the uniqueness rule exists to prevent.
+ *
+ * `required: false` because `body` is genuinely optional here: a post may carry
+ * a YouTube link or an external URL instead, which `blogPublishGate` enforces.
+ */
+export const validateBlogParagraphs = validateParagraphs({
+  maxRows: MAX_DESCRIPTION_PARAGRAPHS,
+  maxChars: LIMITS.postParagraph,
+  caseInsensitiveUniqueness: true,
+  uniquenessMessage: 'Each paragraph must be unique.',
+  required: false,
+})
+
 export const BlogPosts: CollectionConfig = {
   slug: 'blog-posts',
 
@@ -121,7 +143,18 @@ export const BlogPosts: CollectionConfig = {
   },
 
   hooks: {
-    beforeValidate: [blogSlugLock, blogPublishGate],
+    beforeValidate: [
+      blogSlugLock,
+      blogPublishGate,
+      // 🔴 D-1. `onlyWhenPublished: true` — drafts are scratch here too.
+      surfaceValidationErrors(
+        [
+          { path: 'body', label: 'Article paragraphs', validate: validateBlogParagraphs },
+          { path: 'video.youtubeUrl', label: 'YouTube link', validate: validateYoutubeUrl },
+        ],
+        { onlyWhenPublished: true },
+      ),
+    ],
     afterChange: [auditAfterChange, revalidateBlogPost],
     // Archiving a published post must drop it from /blog, which is the same
     // refresh as publishing one.
@@ -276,6 +309,12 @@ export const BlogPosts: CollectionConfig = {
           label: 'YouTube link',
           type: 'text',
           maxLength: LIMITS.url,
+          // 🔴 SERVER-SIDE FORMAT VALIDATION. Before this, a non-YouTube link
+          // (a Vimeo URL, a channel page, a playlist, anything from YouTube
+          // Studio) saved with a 200 and then rendered as a dead still image
+          // forever, with nothing in the admin and nothing in any log. One
+          // shared definition, mirrored from the frontend's `youtubeId()`.
+          validate: validateYoutubeUrl,
           hooks: {
             beforeValidate: [({ value }) => (typeof value === 'string' ? value.trim() : value)],
           },
@@ -357,23 +396,7 @@ export const BlogPosts: CollectionConfig = {
        * `projects.description` because the frontend renders both the same way
        * and a React key collision is silent on a prerendered page.
        */
-      validate: (value: unknown): true | string => {
-        if (value === undefined || value === null) return true
-        if (!Array.isArray(value)) return 'Paragraphs must be a list.'
-        if (value.length > MAX_DESCRIPTION_PARAGRAPHS) {
-          return `At most ${MAX_DESCRIPTION_PARAGRAPHS} paragraphs.`
-        }
-        const seen = new Set<string>()
-        for (const v of value) {
-          if (typeof v !== 'string' || v.trim() === '') return 'Paragraphs cannot be empty.'
-          if (v.length > LIMITS.postParagraph) {
-            return `A paragraph may be at most ${LIMITS.postParagraph} characters.`
-          }
-          if (seen.has(v)) return 'Each paragraph must be unique.'
-          seen.add(v)
-        }
-        return true
-      },
+      validate: validateBlogParagraphs,
     },
   ],
 }

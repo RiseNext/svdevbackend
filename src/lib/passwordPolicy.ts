@@ -133,10 +133,44 @@ const fold = (value: string): string =>
     .replace(/[5$]/g, 's')
     .replace(/[7]/g, 't')
 
+/** The seeds alone, for the decoration-stripping check below. */
+const SEED_SET: ReadonlySet<string> = new Set(BREACHED_SEEDS)
+
+/**
+ * Strips a trailing run of non-letters — digits, punctuation, spaces.
+ *
+ * 🔴 WHY THIS EXISTS: `BREACHED` is built as `seed + suffix` over a flat list
+ * of SINGLE suffixes, so COMBINING two of them escaped it entirely. Measured
+ * before this fix: `password!2026`, `P@ssw0rd!2026` and `admin@2026!` were all
+ * ACCEPTED — thirteen characters built on the most-guessed base in existence,
+ * because `!2026` is not a `SUFFIXES` entry and never could be without
+ * enumerating the cross-product of every decoration a human might append.
+ *
+ * ⚠️ STRIPPED BEFORE FOLDING, NOT AFTER, AND THE ORDER IS THE WHOLE TRICK.
+ * `fold()` maps `0 -> o` and `1|! -> i`, so folding first turns `password!2026`
+ * into `passwordi2o26` — the digits become letters and the trailing run is no
+ * longer strippable. Stripping first gives `password`, which folding then
+ * leaves alone.
+ *
+ * It does not weaken anything: a real passphrase keeps letters after the strip
+ * (`orchard-lantern-bridge-quiet-77` -> `orchard-lantern-bridge-quiet`), which
+ * is not a seed.
+ */
+const stripTrailingDecoration = (value: string): string =>
+  value.toLowerCase().replace(/[^a-z]+$/, '')
+
 export const isBreachedPassword = (password: string): boolean => {
   const lower = password.toLowerCase()
   if (BREACHED.has(lower)) return true
   if (BREACHED.has(fold(password))) return true
+
+  // The compound-decoration check. Both the plain and the leet-folded base are
+  // tested, so `password!2026` and `P@ssw0rd!2026` both reduce onto `password`.
+  const base = stripTrailingDecoration(password)
+  if (base.length > 0) {
+    if (SEED_SET.has(base)) return true
+    if (SEED_SET.has(fold(base))) return true
+  }
 
   // A single repeated character of any length, e.g. "aaaaaaaaaaaa".
   if (/^(.)\1+$/.test(password)) return true

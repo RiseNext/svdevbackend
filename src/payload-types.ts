@@ -174,7 +174,7 @@ export interface User {
   name: string;
   role: 'admin';
   /**
-   * Disable instead of deleting — audit attribution must survive. NOTE: unticking this closes the authorisation door on the next request, but does NOT end an existing session. To fully revoke access you must ALSO change this user’s password as an admin, which ends all of their sessions. See the deactivation runbook.
+   * Disable instead of deleting — audit attribution must survive. Unticking this takes effect immediately: the account can no longer sign in, and any session it already has is ended on its next request. No second step is needed.
    */
   isActive: boolean;
   updatedAt: string;

@@ -3,6 +3,7 @@ import type { CollectionConfig } from 'payload'
 import { anyone, isAdmin, isAdminField, serverOnlyField } from '@/access'
 import { LIMITS } from '@/lib/constants'
 import { auditAfterChange, auditAfterDelete } from '@/hooks/audit'
+import { surfaceValidationErrors } from '@/hooks/surfaceValidation'
 import { captureReplacedFile, mediaDeleteGuard, mediaTrashGuard, stampUploadedBy } from '@/hooks/mediaGuards'
 import { applyUploadGuardValues, imageUploadGuard } from '@/hooks/uploadGuard'
 
@@ -20,6 +21,26 @@ import { applyUploadGuardValues, imageUploadGuard } from '@/hooks/uploadGuard'
  * The roadmap's "Projects in Phase 1, Media in Phase 5" is not a late ordering,
  * it is IMPOSSIBLE.
  */
+/**
+ * ALT TEXT — the single definition of the rule.
+ *
+ * Takes the sibling data (or, from the collection hook, the whole document)
+ * because the rule is CONDITIONAL: alt is mandatory unless `isDecorative` is
+ * ticked. Both call sites pass an object with `isDecorative` on it, so one
+ * signature serves both.
+ */
+export const validateAlt = (
+  value: unknown,
+  siblings: Record<string, unknown> | undefined,
+): true | string => {
+  if (siblings?.isDecorative) return true
+  if (typeof value !== 'string' || value.trim() === '') {
+    return 'Alt text is required, or tick "decorative" if the image carries no information.'
+  }
+  if (value.length > LIMITS.alt) return `Alt text may be at most ${LIMITS.alt} characters.`
+  return true
+}
+
 export const Media: CollectionConfig = {
   slug: 'media',
 
@@ -143,6 +164,22 @@ export const Media: CollectionConfig = {
 
   hooks: {
     beforeOperation: [imageUploadGuard],
+    // 🔴 D-1. Without this the administrator saw only "The following field is
+    // invalid: Alt" — Payload drops a field validator's message before the
+    // response leaves the server. `onlyWhenPublished: false` because `media`
+    // has `versions: false`, so there is no draft state to exempt.
+    beforeValidate: [
+      surfaceValidationErrors(
+        [
+          {
+            path: 'alt',
+            label: 'Alt text',
+            validate: (value, doc) => validateAlt(value, doc),
+          },
+        ],
+        { onlyWhenPublished: false },
+      ),
+    ],
     beforeChange: [mediaTrashGuard, applyUploadGuardValues, stampUploadedBy],
     afterChange: [captureReplacedFile, auditAfterChange],
     beforeDelete: [mediaDeleteGuard],
@@ -159,15 +196,13 @@ export const Media: CollectionConfig = {
         description:
           'Describe the image for someone who cannot see it. If it carries no information of its own, tick "decorative" below and leave this blank.',
       },
-      validate: (value: unknown, { siblingData }: { siblingData?: unknown }): true | string => {
-        const decorative = (siblingData as { isDecorative?: boolean } | undefined)?.isDecorative
-        if (decorative) return true
-        if (typeof value !== 'string' || value.trim() === '') {
-          return 'Alt text is required, or tick "decorative" if the image carries no information.'
-        }
-        if (value.length > LIMITS.alt) return `Alt text may be at most ${LIMITS.alt} characters.`
-        return true
-      },
+      // 🔴 ONE DEFINITION, TWO DELIVERY MECHANISMS. `validateAlt` below is
+      // attached here (so `required` still paints the asterisk and the field
+      // pipeline remains the enforcement of record) AND handed to
+      // `surfaceValidationErrors`, which is the only way the authored message
+      // actually reaches the administrator. See src/hooks/surfaceValidation.ts.
+      validate: (value: unknown, { siblingData }: { siblingData?: unknown }): true | string =>
+        validateAlt(value, siblingData as Record<string, unknown> | undefined),
     },
     {
       name: 'isDecorative',
