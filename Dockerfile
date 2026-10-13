@@ -31,6 +31,37 @@ COPY package.json package-lock.json ./
 # `npm ci` requires the committed lockfile — which is why package-lock.json is
 # committed, and why the package manager decision (npm) keeps the documented
 # deployment path working without rewriting it.
+#
+# ---------------------------------------------------------------------------
+# 🔴 THE LOCKFILE MUST BE REGENERATED ON LINUX, NOT ON WINDOWS. MEASURED.
+#
+# A lockfile written by npm on Windows can omit the musl half of `sharp`'s
+# optional dependency tree. It records `@img/sharp-wasm32` but prunes that
+# package's OWN dependencies, and then `npm ci` on Alpine refuses:
+#
+#     npm error `npm ci` can only install packages when your package.json and
+#     npm error package-lock.json ... are in sync.
+#     npm error Missing: @emnapi/runtime@1.11.3 from lock file
+#     npm error Missing: @emnapi/core@1.11.3 from lock file
+#
+# ⚠️ IT FAILS *ONLY* IN THE CONTAINER. `npm install`, `npm test`, `npm run
+# build`, typecheck and lint all pass on the developer's machine, because none
+# of them need the musl variant — so the first sign of trouble is a RED
+# PRODUCTION DEPLOY roughly seventeen seconds after the push, with the previous
+# container still serving and nothing locally reproducing it.
+#
+# This happened: deployment 7031843503 (commit 8036dd0) failed exactly here
+# after a Windows `npm install` added @playwright/test.
+#
+# REGENERATE IT LIKE THIS — same libc as this image:
+#
+#     docker run --rm -v "$PWD":/w -w /w node:24-alpine \
+#       sh -c "apk add --no-cache libc6-compat && npm install --package-lock-only"
+#
+# AND VERIFY BEFORE PUSHING, because nothing else will:
+#
+#     docker build -t svbackend-deploy-check .
+# ---------------------------------------------------------------------------
 RUN npm ci
 
 # --------------------------------------------------------------- build -----
